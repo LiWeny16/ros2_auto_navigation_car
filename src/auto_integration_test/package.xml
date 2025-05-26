@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>auto_integration_test</name>
+  <version>0.1.0</version>
+  <description>系统集成测试和性能优化模块，用于测试和优化自动驾驶仿真系统</description>
+  <maintainer email="dev@example.com">开发者</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>auto_msgs</depend>
+  <depend>auto_perception</depend>
+  <depend>auto_planning</depend>
+  <depend>auto_control</depend>
+  <depend>auto_simulation</depend>
+  <depend>visualization_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

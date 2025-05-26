@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<!--
+  自动驾驶仿真系统集成测试和性能优化启动文件
+-->
+<launch>
+  <!-- 启动参数 -->
+  <arg name="test_type" default="integration" description="测试类型: integration或performance"/>
+  <arg name="results_file" default="test_results.csv" description="结果文件名"/>
+  
+  <!-- 启动仿真节点 -->
+  <node pkg="auto_simulation" exec="simulation_node" name="simulation_node">
+    <param name="map_update_interval" value="5.0"/>
+    <param name="planning_interval" value="10.0"/>
+  </node>
+
+  <!-- 启动规划节点 -->
+  <node pkg="auto_planning" exec="path_planner_node" name="path_planner_node">
+  </node>
+  
+  <!-- 启动感知节点 -->
+  <node pkg="auto_perception" exec="perception_node" name="perception_node">
+  </node>
+  
+  <!-- 启动控制节点 -->
+  <node pkg="auto_control" exec="controller_node" name="controller_node">
+  </node>
+  
+  <!-- 根据测试类型启动不同的测试节点 -->
+  <group if="$(eval 'test_type == \'integration\'')">
+    <node pkg="auto_integration_test" exec="test_runner" name="test_runner" output="screen">
+      <param name="results_file" value="$(var results_file)"/>
+    </node>
+  </group>
+  
+  <group if="$(eval 'test_type == \'performance\'')">
+    <node pkg="auto_integration_test" exec="optimizer" name="optimizer" output="screen">
+      <param name="results_file" value="$(var results_file)"/>
+    </node>
+  </group>
+</launch>
