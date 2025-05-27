@@ -1,0 +1,12 @@
+自动驾驶系统依赖检查报告
+生成时间: 2025年 05月 26日 星期一 11:30:40 CST
+工作空间: /home/onion/samples/autonomous_driving_ws
+
+期望版本:
+- ROS2: humble
+- TF2: 0.25.12
+- Eigen: 3.4.0
+- nlohmann_json: 3.10.5
+- Mosquitto: 2.0.11
+
+检查结果: 请查看上方输出

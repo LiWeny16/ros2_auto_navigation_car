@@ -137,7 +137,7 @@ private:
     void visualizeControl(const ControlCommand& cmd) {
         visualization_msgs::msg::MarkerArray marker_array;
         
-        // 添加车辆标记
+        // 添加车辆主体标记（更大更明显）
         visualization_msgs::msg::Marker vehicle_marker;
         vehicle_marker.header.frame_id = "map";
         vehicle_marker.header.stamp = this->now();
@@ -148,96 +148,90 @@ private:
         
         // 设置位置和方向
         vehicle_marker.pose = vehicle_pose_.pose;
+        vehicle_marker.pose.position.z = 0.75;  // 抬高车辆，使其更明显
         
-        // 设置车辆大小
-        vehicle_marker.scale.x = 4.5;  // 长度
-        vehicle_marker.scale.y = 2.0;  // 宽度
-        vehicle_marker.scale.z = 1.5;  // 高度
+        // 设置车辆大小（更大）
+        vehicle_marker.scale.x = 4.8;  // 长度
+        vehicle_marker.scale.y = 2.2;  // 宽度
+        vehicle_marker.scale.z = 1.8;  // 高度
         
-        // 设置颜色
-        vehicle_marker.color.r = 0.2;
-        vehicle_marker.color.g = 0.2;
-        vehicle_marker.color.b = 0.8;
-        vehicle_marker.color.a = 0.8;
+        // 设置颜色（更亮的蓝色）
+        vehicle_marker.color.r = 0.1;
+        vehicle_marker.color.g = 0.3;
+        vehicle_marker.color.b = 1.0;
+        vehicle_marker.color.a = 0.9;
         
         marker_array.markers.push_back(vehicle_marker);
         
-        // 添加轮子标记
-        double wheelbase = 2.7;
-        double track_width = 1.6;
+        // 添加车辆方向指示箭头
+        visualization_msgs::msg::Marker direction_marker;
+        direction_marker.header.frame_id = "map";
+        direction_marker.header.stamp = this->now();
+        direction_marker.ns = "vehicle_direction";
+        direction_marker.id = 0;
+        direction_marker.type = visualization_msgs::msg::Marker::ARROW;
+        direction_marker.action = visualization_msgs::msg::Marker::ADD;
         
-        // 前轮（带转向）
-        double steering_angle = cmd.steering_angle;
+        direction_marker.pose = vehicle_pose_.pose;
+        direction_marker.pose.position.z = 2.0;  // 在车辆上方
         
-        // 左前轮
-        visualization_msgs::msg::Marker lf_wheel_marker;
-        lf_wheel_marker.header.frame_id = "map";
-        lf_wheel_marker.header.stamp = this->now();
-        lf_wheel_marker.ns = "wheels";
-        lf_wheel_marker.id = 1;
-        lf_wheel_marker.type = visualization_msgs::msg::Marker::CUBE;
-        lf_wheel_marker.action = visualization_msgs::msg::Marker::ADD;
+        // 箭头大小
+        direction_marker.scale.x = 3.0;  // 长度
+        direction_marker.scale.y = 0.5;  // 宽度
+        direction_marker.scale.z = 0.5;  // 高度
         
-        // 计算轮子位置（车辆坐标系）
-        double wheel_x_offset = 1.8;  // 前轮到车辆中心的距离
+        // 明亮的黄色箭头
+        direction_marker.color.r = 1.0;
+        direction_marker.color.g = 1.0;
+        direction_marker.color.b = 0.0;
+        direction_marker.color.a = 1.0;
         
-        // 转换到全局坐标系
+        marker_array.markers.push_back(direction_marker);
+        
+        // 添加车辆轮廓标记
+        visualization_msgs::msg::Marker outline_marker;
+        outline_marker.header.frame_id = "map";
+        outline_marker.header.stamp = this->now();
+        outline_marker.ns = "vehicle_outline";
+        outline_marker.id = 0;
+        outline_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+        outline_marker.action = visualization_msgs::msg::Marker::ADD;
+        
+        outline_marker.pose = vehicle_pose_.pose;
+        outline_marker.scale.x = 0.2;  // 线宽
+        
+        // 白色轮廓
+        outline_marker.color.r = 1.0;
+        outline_marker.color.g = 1.0;
+        outline_marker.color.b = 1.0;
+        outline_marker.color.a = 1.0;
+        
+        // 计算车辆四个角的位置
         tf2::Quaternion quat;
         tf2::fromMsg(vehicle_pose_.pose.orientation, quat);
         double yaw = tf2::impl::getYaw(quat);
         
-        lf_wheel_marker.pose = vehicle_pose_.pose;
-        lf_wheel_marker.pose.position.x += wheel_x_offset * cos(yaw) - track_width/2 * sin(yaw);
-        lf_wheel_marker.pose.position.y += wheel_x_offset * sin(yaw) + track_width/2 * cos(yaw);
+        double half_length = 2.4;
+        double half_width = 1.1;
         
-        // 设置方向（考虑转向）
-        tf2::Quaternion q_lf;
-        q_lf.setRPY(0.0, 0.0, yaw + steering_angle);
-        lf_wheel_marker.pose.orientation = tf2::toMsg(q_lf);
+        // 车辆四个角
+        std::vector<std::pair<double, double>> corners = {
+            {half_length, half_width},    // 右前
+            {half_length, -half_width},   // 左前
+            {-half_length, -half_width},  // 左后
+            {-half_length, half_width},   // 右后
+            {half_length, half_width}     // 回到起点闭合
+        };
         
-        // 设置轮子大小
-        lf_wheel_marker.scale.x = 0.7;  // 长度
-        lf_wheel_marker.scale.y = 0.3;  // 宽度
-        lf_wheel_marker.scale.z = 0.7;  // 高度
+        for (const auto& [local_x, local_y] : corners) {
+            geometry_msgs::msg::Point p;
+            p.x = vehicle_pose_.pose.position.x + local_x * cos(yaw) - local_y * sin(yaw);
+            p.y = vehicle_pose_.pose.position.y + local_x * sin(yaw) + local_y * cos(yaw);
+            p.z = 0.1;
+            outline_marker.points.push_back(p);
+        }
         
-        // 设置颜色
-        lf_wheel_marker.color.r = 0.1;
-        lf_wheel_marker.color.g = 0.1;
-        lf_wheel_marker.color.b = 0.1;
-        lf_wheel_marker.color.a = 1.0;
-        
-        marker_array.markers.push_back(lf_wheel_marker);
-        
-        // 右前轮
-        visualization_msgs::msg::Marker rf_wheel_marker = lf_wheel_marker;
-        rf_wheel_marker.id = 2;
-        rf_wheel_marker.pose.position.x = vehicle_pose_.pose.position.x + wheel_x_offset * cos(yaw) + track_width/2 * sin(yaw);
-        rf_wheel_marker.pose.position.y = vehicle_pose_.pose.position.y + wheel_x_offset * sin(yaw) - track_width/2 * cos(yaw);
-        rf_wheel_marker.pose.orientation = tf2::toMsg(q_lf);  // 和左前轮一样的转向
-        
-        marker_array.markers.push_back(rf_wheel_marker);
-        
-        // 左后轮
-        visualization_msgs::msg::Marker lr_wheel_marker = lf_wheel_marker;
-        lr_wheel_marker.id = 3;
-        lr_wheel_marker.pose.position.x = vehicle_pose_.pose.position.x - wheelbase * cos(yaw) - track_width/2 * sin(yaw);
-        lr_wheel_marker.pose.position.y = vehicle_pose_.pose.position.y - wheelbase * sin(yaw) + track_width/2 * cos(yaw);
-        
-        // 后轮没有转向
-        tf2::Quaternion q_lr;
-        q_lr.setRPY(0.0, 0.0, yaw);
-        lr_wheel_marker.pose.orientation = tf2::toMsg(q_lr);
-        
-        marker_array.markers.push_back(lr_wheel_marker);
-        
-        // 右后轮
-        visualization_msgs::msg::Marker rr_wheel_marker = lr_wheel_marker;
-        rr_wheel_marker.id = 4;
-        rr_wheel_marker.pose.position.x = vehicle_pose_.pose.position.x - wheelbase * cos(yaw) + track_width/2 * sin(yaw);
-        rr_wheel_marker.pose.position.y = vehicle_pose_.pose.position.y - wheelbase * sin(yaw) - track_width/2 * cos(yaw);
-        rr_wheel_marker.pose.orientation = tf2::toMsg(q_lr);
-        
-        marker_array.markers.push_back(rr_wheel_marker);
+        marker_array.markers.push_back(outline_marker);
         
         // 发布标记
         cmd_vis_pub_->publish(marker_array);

@@ -7,6 +7,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "tf2/utils.h"
 
 using std::placeholders::_1;
 using namespace std::chrono_literals;
@@ -114,7 +115,9 @@ private:
                 if (i < current_path_.points.size()) {
                     // 获取路径点
                     const auto& point = current_path_.points[i];
-                    double yaw = tf2::getYaw(point.pose.orientation);
+                    tf2::Quaternion quat;
+                    tf2::fromMsg(point.pose.orientation, quat);
+                    double yaw = tf2::impl::getYaw(quat);
                     
                     // 计算垂直于路径方向的向量
                     double nx = -sin(yaw);
@@ -135,7 +138,9 @@ private:
                 if (i >= 0 && i < static_cast<int>(current_path_.points.size())) {
                     // 获取路径点
                     const auto& point = current_path_.points[i];
-                    double yaw = tf2::getYaw(point.pose.orientation);
+                    tf2::Quaternion quat;
+                    tf2::fromMsg(point.pose.orientation, quat);
+                    double yaw = tf2::impl::getYaw(quat);
                     
                     // 计算垂直于路径方向的向量
                     double nx = -sin(yaw);

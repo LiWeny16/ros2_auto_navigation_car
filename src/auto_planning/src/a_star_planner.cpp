@@ -5,7 +5,8 @@
 
 namespace auto_planning {
 
-AStarPlanner::AStarPlanner() {}
+AStarPlanner::AStarPlanner(double vehicle_length, double vehicle_width)
+    : vehicle_length_(vehicle_length), vehicle_width_(vehicle_width) {}
 
 auto_msgs::msg::PlanningPath AStarPlanner::plan(
     const auto_msgs::msg::GridMap& map,
@@ -19,8 +20,8 @@ auto_msgs::msg::PlanningPath AStarPlanner::plan(
     auto goal_grid = worldToGrid(map, goal.pose);
     
     // 如果起点或终点不在地图内或是障碍物，返回空路径
-    if (!isValidNode(map, start_grid.first, start_grid.second) || 
-        !isValidNode(map, goal_grid.first, goal_grid.second)) {
+    if (!isCollisionFreeGrid(map, start_grid.first, start_grid.second) || 
+        !isCollisionFreeGrid(map, goal_grid.first, goal_grid.second)) {
         std::cerr << "起点或终点不可达。" << std::endl;
         return auto_msgs::msg::PlanningPath();
     }
@@ -67,7 +68,7 @@ auto_msgs::msg::PlanningPath AStarPlanner::plan(
             int ny = current.y + dir.second;
             
             // 检查邻居节点是否有效且未访问过
-            if (isValidNode(map, nx, ny) && !closed_list[nx][ny]) {
+            if (isCollisionFreeGrid(map, nx, ny) && !closed_list[nx][ny]) {
                 // 计算从起点到该邻居的代价
                 double move_cost = (dir.first != 0 && dir.second != 0) ? 1.414 : 1.0; // 对角线移动代价为√2
                 double new_g_cost = current.g_cost + move_cost;
@@ -188,6 +189,35 @@ bool AStarPlanner::isValidNode(const auto_msgs::msg::GridMap& map, int x, int y)
     }
     
     return false;
+}
+
+bool AStarPlanner::isCollisionFreeGrid(const auto_msgs::msg::GridMap& map, int x, int y) {
+    // 计算车辆在网格中占用的尺寸（包含安全边距）
+    double total_length = vehicle_length_ + 2 * safety_margin_;
+    double total_width = vehicle_width_ + 2 * safety_margin_;
+    
+    // 转换为网格单元数
+    int length_cells = static_cast<int>(std::ceil(total_length / map.resolution));
+    int width_cells = static_cast<int>(std::ceil(total_width / map.resolution));
+    
+    // 计算车辆占用的网格范围（以车辆中心为基准）
+    int half_length = length_cells / 2;
+    int half_width = width_cells / 2;
+    
+    // 检查车辆占用的所有网格单元
+    for (int dx = -half_length; dx <= half_length; ++dx) {
+        for (int dy = -half_width; dy <= half_width; ++dy) {
+            int check_x = x + dx;
+            int check_y = y + dy;
+            
+            // 如果任何一个网格单元无效或有障碍物，则碰撞
+            if (!isValidNode(map, check_x, check_y)) {
+                return false;
+            }
+        }
+    }
+    
+    return true;
 }
 
 double AStarPlanner::heuristic(int x1, int y1, int x2, int y2) {

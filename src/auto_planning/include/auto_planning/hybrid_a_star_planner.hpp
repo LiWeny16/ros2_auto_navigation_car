@@ -58,7 +58,7 @@ struct HybridNodeKeyHash {
 
 class HybridAStarPlanner {
 public:
-    HybridAStarPlanner(double wheel_base = 2.7);
+    HybridAStarPlanner(double wheel_base = 2.7, double vehicle_length = 4.5, double vehicle_width = 2.0);
     virtual ~HybridAStarPlanner() = default;
 
     // 使用Hybrid A*算法计算路径
@@ -70,6 +70,12 @@ public:
 protected:
     // 检查节点是否有效（在地图范围内且不是障碍物）
     bool isValidNode(const auto_msgs::msg::GridMap& map, double x, double y);
+    
+    // 检查车辆在指定位置和方向是否与障碍物碰撞
+    bool isCollisionFree(const auto_msgs::msg::GridMap& map, double x, double y, double theta);
+    
+    // 获取车辆在指定位置和方向下的四个角点坐标
+    std::vector<std::pair<double, double>> getVehicleCorners(double x, double y, double theta);
 
     // 启发式函数：使用欧几里得距离
     double heuristic(double x1, double y1, double x2, double y2);
@@ -95,8 +101,10 @@ protected:
         const HybridNode& current, 
         const auto_msgs::msg::GridMap& map);
 
-    // 轮距
-    double wheel_base_;
+    // 车辆参数
+    double wheel_base_;          // 轮距
+    double vehicle_length_;      // 车辆长度
+    double vehicle_width_;       // 车辆宽度
     
     // 转向角度集合
     std::vector<double> steering_angles_ = {-0.6, -0.3, 0.0, 0.3, 0.6};
@@ -106,6 +114,9 @@ protected:
     
     // 方向角离散化参数
     const int angle_size_ = 72;  // 5度一个离散角度
+    
+    // 安全边距（为了增加安全性，在车辆尺寸基础上增加的边距）
+    double safety_margin_ = 0.2;
 };
 
 } // namespace auto_planning

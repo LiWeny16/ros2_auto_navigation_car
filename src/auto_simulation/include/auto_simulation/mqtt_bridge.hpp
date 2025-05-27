@@ -8,6 +8,7 @@
 #include "auto_msgs/msg/planning_path.hpp"
 #include "auto_msgs/msg/grid_map.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/twist.hpp"
 
 namespace auto_simulation {
 
@@ -45,9 +46,22 @@ public:
     bool publishVehiclePose(const geometry_msgs::msg::PoseStamped& pose);
     bool publishPlanningPath(const auto_msgs::msg::PlanningPath& path);
     
+    // 新增：自动泊车相关消息发布
+    bool publishVehicleState(const geometry_msgs::msg::PoseStamped& pose, 
+                           const geometry_msgs::msg::Twist& velocity,
+                           const std::string& control_mode = "auto");
+    bool publishParkingSpots(const std::vector<std::string>& parking_spots_json);
+    bool publishManualControl(double steering, double throttle, double brake, bool reverse);
+    bool publishParkingStatus(const std::string& status, const std::string& target_spot_id = "");
+    bool publishEnvironmentObjects(const std::string& objects_json);
+    
     // 从JSON解析消息
     auto_msgs::msg::GridMap parseGridMap(const std::string& json);
     geometry_msgs::msg::PoseStamped parsePoseStamped(const std::string& json);
+    
+    // 新增：解析泊车相关消息
+    geometry_msgs::msg::Twist parseManualControl(const std::string& json);
+    std::string parseParkingCommand(const std::string& json);
 
 private:
     // MQTT回调函数

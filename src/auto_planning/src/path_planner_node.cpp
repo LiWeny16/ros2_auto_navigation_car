@@ -7,12 +7,12 @@
 #include "auto_msgs/msg/planning_path.hpp"
 #include "auto_msgs/msg/planning_request.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
-#include "auto_perception/object_detector.hpp"
+// #include "auto_perception/object_detector.hpp"
 
 #include "auto_planning/a_star_planner.hpp"
 #include "auto_planning/optimized_a_star_planner.hpp"
 #include "auto_planning/hybrid_a_star_planner.hpp"
-#include "auto_planning/decision_maker.hpp"
+// #include "auto_planning/decision_maker.hpp"
 
 using std::placeholders::_1;
 using namespace std::chrono_literals;
@@ -26,7 +26,7 @@ public:
     a_star_planner_ = std::make_unique<AStarPlanner>();
     optimized_a_star_planner_ = std::make_unique<OptimizedAStarPlanner>();
     hybrid_a_star_planner_ = std::make_unique<HybridAStarPlanner>();
-    decision_maker_ = std::make_unique<DecisionMaker>();
+    // decision_maker_ = std::make_unique<DecisionMaker>();
         
         // 创建订阅者
         map_sub_ = this->create_subscription<auto_msgs::msg::GridMap>(
@@ -42,12 +42,12 @@ public:
         path_pub_ = this->create_publisher<auto_msgs::msg::PlanningPath>("planning_path", 10);
         
         // 创建定时器以执行持续决策
-        decision_timer_ = this->create_wall_timer(
-            200ms, std::bind(&PathPlannerNode::decisionLoop, this));
+        // decision_timer_ = this->create_wall_timer(
+        //     200ms, std::bind(&PathPlannerNode::decisionLoop, this));
         
         // 设置决策参数
-        decision_maker_->setSafetyDistance(5.0);
-        decision_maker_->setEmergencyDistance(2.0);
+        // decision_maker_->setSafetyDistance(5.0);
+        // decision_maker_->setEmergencyDistance(2.0);
         
         RCLCPP_INFO(this->get_logger(), "路径规划节点已启动");
     }
@@ -80,7 +80,7 @@ private:
             RCLCPP_INFO(this->get_logger(), "使用优化A*规划路径");
             
             // 解析配置参数（如果有）
-            OptimizedAStarPlanner::AStarConfig config;
+            AStarConfig config;
             std::string frame_id = msg->header.frame_id;
             
             if (frame_id.find("config:") == 0) {
@@ -153,113 +153,68 @@ private:
         path_pub_->publish(path);
     }
     
-    void objectsCallback(const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
+    void objectsCallback(const visualization_msgs::msg::MarkerArray::SharedPtr /* msg */) {
         // 将标记数组转换为检测到的对象列表
-        detected_objects_.clear();
+        // detected_objects_.clear();
         
-        for (const auto& marker : msg->markers) {
-            // 只处理类型为CUBE的标记，这些是物体标记
-            if (marker.type == visualization_msgs::msg::Marker::CUBE && 
-                marker.ns == "detected_objects") {
+        // for (const auto& marker : msg->markers) {
+        //     // 只处理类型为CUBE的标记，这些是物体标记
+        //     if (marker.type == visualization_msgs::msg::Marker::CUBE && 
+        //         marker.ns == "detected_objects") {
                 
-                auto_perception::DetectedObject obj(
-                    marker.id,
-                    marker.pose,
-                    marker.scale.y,  // width
-                    marker.scale.x,  // length
-                    marker.scale.z   // height
-                );
+        //         auto_perception::DetectedObject obj(
+        //             marker.id,
+        //             marker.pose,
+        //             marker.scale.y,  // width
+        //             marker.scale.x,  // length
+        //             marker.scale.z   // height
+        //         );
                 
-                // 根据颜色确定对象类型
-                if (marker.color.r > 0.8 && marker.color.g < 0.2 && marker.color.b < 0.2) {
-                    obj.classification = "vehicle";
-                } else if (marker.color.g > 0.8 && marker.color.r < 0.2 && marker.color.b < 0.2) {
-                    obj.classification = "pedestrian";
-                } else if (marker.color.b > 0.8 && marker.color.r < 0.2 && marker.color.g < 0.2) {
-                    obj.classification = "bicycle";
-                } else {
-                    obj.classification = "obstacle";
-                }
+        //         // 根据颜色确定对象类型
+        //         if (marker.color.r > 0.8 && marker.color.g < 0.2 && marker.color.b < 0.2) {
+        //             obj.classification = "vehicle";
+        //         } else if (marker.color.g > 0.8 && marker.color.r < 0.2 && marker.color.b < 0.2) {
+        //             obj.classification = "pedestrian";
+        //         } else if (marker.color.b > 0.8 && marker.color.r < 0.2 && marker.color.g < 0.2) {
+        //             obj.classification = "bicycle";
+        //         } else {
+        //             obj.classification = "obstacle";
+        //         }
                 
-                obj.confidence = marker.color.a / 0.8;  // 将透明度转换回置信度
+        //         obj.confidence = marker.color.a / 0.8;  // 将透明度转换回置信度
                 
-                detected_objects_.push_back(obj);
-            }
-        }
+        //         detected_objects_.push_back(obj);
+        //     }
+        // }
         
-        RCLCPP_INFO(this->get_logger(), "接收到 %zu 个检测到的对象", detected_objects_.size());
+        // RCLCPP_INFO(this->get_logger(), "接收到 %zu 个检测到的对象", detected_objects_.size());
     }
     
     void decisionLoop() {
         // 如果没有当前目标，无法做决策
-        if (!have_goal_) {
-            return;
-        }
+        // if (!have_goal_) {
+        //     return;
+        // }
         
         // 获取最新的车辆位置（在实际系统中应该从其他模块获取）
-        geometry_msgs::msg::PoseStamped current_pose;
-        current_pose.header.stamp = this->now();
-        current_pose.header.frame_id = "map";
-        // 简化示例，使用固定位置
-        current_pose.pose.position.x = 10.0;
-        current_pose.pose.position.y = 10.0;
-        current_pose.pose.orientation.w = 1.0;
-        
-        // 调用决策器
-        auto decision = decision_maker_->makeDecision(
-            detected_objects_,
-            current_pose,
-            current_goal_,
-            have_path_,
-            2.0  // 假设当前速度为2.0 m/s
-        );
-        
-        // 根据决策结果执行操作
-        switch (decision.type) {
-            case DecisionType::REPLAN:
-                RCLCPP_INFO(this->get_logger(), "决策：重新规划，原因: %s", decision.reason.c_str());
-                // 触发重新规划
-                auto_msgs::msg::PlanningRequest request;
-                request.header.stamp = this->now();
-                request.header.frame_id = "map";
-                request.start = current_pose;
-                request.goal = current_goal_;
-                request.planner_type = "optimized_astar";  // 使用优化版A*重新规划
-                request.consider_kinematic = true;
-                planningRequestCallback(std::make_shared<auto_msgs::msg::PlanningRequest>(request));
-                break;
-                
-            case DecisionType::STOP:
-                RCLCPP_INFO(this->get_logger(), "决策：停车，原因: %s", decision.reason.c_str());
-                // 在实际系统中，应该发送停车命令
-                break;
-                
-            case DecisionType::EMERGENCY_STOP:
-                RCLCPP_INFO(this->get_logger(), "决策：紧急停车，原因: %s", decision.reason.c_str());
-                // 在实际系统中，应该发送紧急停车命令
-                break;
-                
-            case DecisionType::FOLLOW_PATH:
-                // 继续跟随当前路径，不需要特殊处理
-                break;
-        }
+        // geometry_msgs::msg::PoseStamped current_pose;
     }
     
     bool haveValidMap() {
         return current_map_.width > 0 && current_map_.height > 0 && !current_map_.data.empty();
     }
-    
+
     // 规划器
     std::unique_ptr<AStarPlanner> a_star_planner_;
     std::unique_ptr<OptimizedAStarPlanner> optimized_a_star_planner_;
     std::unique_ptr<HybridAStarPlanner> hybrid_a_star_planner_;
-    std::unique_ptr<DecisionMaker> decision_maker_;
+    // std::unique_ptr<DecisionMaker> decision_maker_;
     
     // 当前地图
     auto_msgs::msg::GridMap current_map_;
     
     // 检测到的对象
-    std::vector<auto_perception::DetectedObject> detected_objects_;
+    // std::vector<auto_perception::DetectedObject> detected_objects_;
     
     // 当前目标和路径状态
     geometry_msgs::msg::PoseStamped current_goal_;
@@ -275,7 +230,7 @@ private:
     rclcpp::Publisher<auto_msgs::msg::PlanningPath>::SharedPtr path_pub_;
     
     // 定时器
-    rclcpp::TimerBase::SharedPtr decision_timer_;
+    // rclcpp::TimerBase::SharedPtr decision_timer_;
 };
 
 } // namespace auto_planning

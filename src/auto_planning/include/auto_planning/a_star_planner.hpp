@@ -33,7 +33,7 @@ struct Node {
 
 class AStarPlanner {
 public:
-    AStarPlanner();
+    AStarPlanner(double vehicle_length = 4.5, double vehicle_width = 2.0);
     virtual ~AStarPlanner() = default;
 
     // 使用A*算法计算路径
@@ -55,9 +55,19 @@ protected:
 
     // 检查节点是否有效（在地图范围内且不是障碍物）
     bool isValidNode(const auto_msgs::msg::GridMap& map, int x, int y);
+    
+    // 检查车辆在指定网格位置是否与障碍物碰撞（简化版，不考虑朝向）
+    bool isCollisionFreeGrid(const auto_msgs::msg::GridMap& map, int x, int y);
 
     // 启发式函数：使用欧几里得距离
     double heuristic(int x1, int y1, int x2, int y2);
+
+    // 车辆参数
+    double vehicle_length_;      // 车辆长度
+    double vehicle_width_;       // 车辆宽度
+    
+    // 安全边距（为了增加安全性，在车辆尺寸基础上增加的边距）
+    double safety_margin_ = 0.2;
 
     // 方向数组，用于8个方向的移动
     const std::vector<std::pair<int, int>> directions = {

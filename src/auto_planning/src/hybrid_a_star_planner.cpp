@@ -6,8 +6,8 @@
 
 namespace auto_planning {
 
-HybridAStarPlanner::HybridAStarPlanner(double wheel_base)
-    : wheel_base_(wheel_base) {}
+HybridAStarPlanner::HybridAStarPlanner(double wheel_base, double vehicle_length, double vehicle_width)
+    : wheel_base_(wheel_base), vehicle_length_(vehicle_length), vehicle_width_(vehicle_width) {}
 
 auto_msgs::msg::PlanningPath HybridAStarPlanner::plan(
     const auto_msgs::msg::GridMap& map,
@@ -27,7 +27,7 @@ auto_msgs::msg::PlanningPath HybridAStarPlanner::plan(
     double goal_theta = 2.0 * std::atan2(goal.pose.orientation.z, goal.pose.orientation.w);
     
     // 检查起点和终点是否有效
-    if (!isValidNode(map, start_x, start_y) || !isValidNode(map, goal_x, goal_y)) {
+    if (!isCollisionFree(map, start_x, start_y, start_theta) || !isCollisionFree(map, goal_x, goal_y, goal_theta)) {
         std::cerr << "起点或终点不可达。" << std::endl;
         return auto_msgs::msg::PlanningPath();
     }
@@ -196,6 +196,102 @@ bool HybridAStarPlanner::isValidNode(const auto_msgs::msg::GridMap& map, double 
     return false;
 }
 
+bool HybridAStarPlanner::isCollisionFree(const auto_msgs::msg::GridMap& map, double x, double y, double theta) {
+    // 获取车辆四个角点的坐标
+    auto corners = getVehicleCorners(x, y, theta);
+    
+    // 检查每个角点是否在有效区域内
+    for (const auto& corner : corners) {
+        if (!isValidNode(map, corner.first, corner.second)) {
+            return false;
+        }
+    }
+    
+    // 检查车辆边缘的额外点以确保完整的碰撞检测
+    double check_resolution = 0.2;  // 每0.2米检查一个点
+    
+    // 检查车辆长边（左侧和右侧）
+    for (int i = 0; i < 2; ++i) {
+        double start_x = corners[i].first;
+        double start_y = corners[i].second;
+        double end_x = corners[(i + 1) % 4].first;
+        double end_y = corners[(i + 1) % 4].second;
+        
+        double dx = end_x - start_x;
+        double dy = end_y - start_y;
+        double length = std::sqrt(dx * dx + dy * dy);
+        int num_checks = static_cast<int>(length / check_resolution) + 1;
+        
+        for (int j = 0; j <= num_checks; ++j) {
+            double t = static_cast<double>(j) / static_cast<double>(num_checks);
+            double check_x = start_x + t * dx;
+            double check_y = start_y + t * dy;
+            
+            if (!isValidNode(map, check_x, check_y)) {
+                return false;
+            }
+        }
+    }
+    
+    // 检查车辆短边（前面和后面）
+    for (int i = 1; i < 3; ++i) {
+        double start_x = corners[i].first;
+        double start_y = corners[i].second;
+        double end_x = corners[(i + 1) % 4].first;
+        double end_y = corners[(i + 1) % 4].second;
+        
+        double dx = end_x - start_x;
+        double dy = end_y - start_y;
+        double length = std::sqrt(dx * dx + dy * dy);
+        int num_checks = static_cast<int>(length / check_resolution) + 1;
+        
+        for (int j = 0; j <= num_checks; ++j) {
+            double t = static_cast<double>(j) / static_cast<double>(num_checks);
+            double check_x = start_x + t * dx;
+            double check_y = start_y + t * dy;
+            
+            if (!isValidNode(map, check_x, check_y)) {
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
+
+std::vector<std::pair<double, double>> HybridAStarPlanner::getVehicleCorners(double x, double y, double theta) {
+    std::vector<std::pair<double, double>> corners;
+    
+    // 考虑安全边距的车辆尺寸
+    double half_length = (vehicle_length_ + 2 * safety_margin_) / 2.0;
+    double half_width = (vehicle_width_ + 2 * safety_margin_) / 2.0;
+    
+    // 车辆坐标系下的四个角点（车辆中心为原点）
+    std::vector<std::pair<double, double>> local_corners = {
+        {half_length, half_width},    // 右前角
+        {half_length, -half_width},   // 左前角
+        {-half_length, -half_width},  // 左后角
+        {-half_length, half_width}    // 右后角
+    };
+    
+    // 将车辆坐标系下的角点转换到世界坐标系
+    double cos_theta = std::cos(theta);
+    double sin_theta = std::sin(theta);
+    
+    for (const auto& local_corner : local_corners) {
+        double local_x = local_corner.first;
+        double local_y = local_corner.second;
+        
+        // 旋转变换
+        double world_x = x + local_x * cos_theta - local_y * sin_theta;
+        double world_y = y + local_x * sin_theta + local_y * cos_theta;
+        
+        corners.emplace_back(world_x, world_y);
+    }
+    
+    return corners;
+}
+
 double HybridAStarPlanner::heuristic(double x1, double y1, double x2, double y2) {
     // 使用欧几里得距离作为启发式
     double dx = x2 - x1;
@@ -271,8 +367,8 @@ std::vector<HybridNode> HybridAStarPlanner::getNextStates(
         while (theta < 0) theta += 2.0 * M_PI;
         while (theta >= 2.0 * M_PI) theta -= 2.0 * M_PI;
         
-        // 检查新状态是否有效
-        if (isValidNode(map, x, y)) {
+        // 检查新状态是否有效（使用车辆形状进行碰撞检测）
+        if (isCollisionFree(map, x, y, theta)) {
             // 计算启发式代价（仅估计，实际代价在主循环中计算）
             double h = 0.0;
             next_states.emplace_back(x, y, theta, 0.0, h, steering);

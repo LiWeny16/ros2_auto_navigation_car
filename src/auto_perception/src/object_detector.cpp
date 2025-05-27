@@ -125,11 +125,8 @@ DetectedObject ObjectDetector::componentToObject(
     pose.position.y = map.origin.position.y + (center_y + 0.5) * map.resolution;
     pose.position.z = 0.5;  // 假设高度为1米，中心在0.5米
     
-    // 为对象分配一个随机方向（范围从0到2π）
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(0, 2 * M_PI);
-    double yaw = dis(gen);
+    // 使用基于位置的固定方向，而不是随机方向
+    double yaw = std::atan2(center_y - map.height/2.0, center_x - map.width/2.0);
     
     // 转换为四元数
     pose.orientation.w = cos(yaw / 2);
@@ -137,16 +134,22 @@ DetectedObject ObjectDetector::componentToObject(
     pose.orientation.y = 0;
     pose.orientation.z = sin(yaw / 2);
     
-    // 创建并返回检测到的对象
-    static const std::vector<std::string> classifications = {
-        "vehicle", "pedestrian", "bicycle", "obstacle"
-    };
+    // 基于位置和大小进行分类，而不是随机分类
+    std::string classification;
+    double confidence;
     
-    std::uniform_int_distribution<> class_dis(0, classifications.size() - 1);
-    std::string classification = classifications[class_dis(gen)];
-    
-    std::uniform_real_distribution<> conf_dis(0.7, 1.0);
-    double confidence = conf_dis(gen);
+    // 基于面积大小分类
+    double area = component.size() * map.resolution * map.resolution;
+    if (area > 10.0) {  // 大型障碍物
+        classification = "vehicle";
+        confidence = 0.9;
+    } else if (area > 2.0) {  // 中型障碍物
+        classification = "obstacle";
+        confidence = 0.8;
+    } else {  // 小型障碍物
+        classification = "pedestrian";
+        confidence = 0.75;
+    }
     
     return DetectedObject(id, pose, width, length, 1.0, classification, confidence);
 }

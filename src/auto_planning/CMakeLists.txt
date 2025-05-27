@@ -62,20 +62,20 @@ ament_target_dependencies(hybrid_a_star_planner
 )
 
 # Add decision maker library
-add_library(decision_maker
-  src/decision_maker.cpp
-)
-target_include_directories(decision_maker PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
-target_compile_features(decision_maker PUBLIC cxx_std_17)
-ament_target_dependencies(decision_maker
-  rclcpp
-  auto_msgs
-  geometry_msgs
-  auto_perception
-)
+# add_library(decision_maker
+#   src/decision_maker.cpp
+# )
+# target_include_directories(decision_maker PUBLIC
+#   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+#   $<INSTALL_INTERFACE:include>
+# )
+# target_compile_features(decision_maker PUBLIC cxx_std_17)
+# ament_target_dependencies(decision_maker
+#   rclcpp
+#   auto_msgs
+#   geometry_msgs
+#   auto_perception
+# )
 
 # Add path planner node executable
 add_executable(path_planner_node src/path_planner_node.cpp)
@@ -85,8 +85,9 @@ target_include_directories(path_planner_node PUBLIC
 target_compile_features(path_planner_node PUBLIC cxx_std_17)
 target_link_libraries(path_planner_node
   a_star_planner
+  optimized_a_star_planner
   hybrid_a_star_planner
-  decision_maker
+  # decision_maker
 )
 ament_target_dependencies(
   path_planner_node
@@ -123,7 +124,7 @@ install(TARGETS
   a_star_planner
   optimized_a_star_planner
   hybrid_a_star_planner
-  decision_maker
+  # decision_maker
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -133,11 +134,11 @@ install(DIRECTORY include/
 )
 
 # Install launch files if any
-install(DIRECTORY
-  launch
-  DESTINATION share/${PROJECT_NAME}/
-  PATTERN ".svn" EXCLUDE
-)
+# install(DIRECTORY
+#   launch
+#   DESTINATION share/${PROJECT_NAME}/
+#   PATTERN ".svn" EXCLUDE
+# )
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

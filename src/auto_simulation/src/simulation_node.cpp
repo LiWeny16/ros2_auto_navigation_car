@@ -30,7 +30,7 @@ public:
         
         // 创建定时器
         map_timer_ = this->create_wall_timer(
-            5s, std::bind(&SimulationNode::publishMap, this));
+            10s, std::bind(&SimulationNode::publishMap, this));
         
         request_timer_ = this->create_wall_timer(
             10s, std::bind(&SimulationNode::sendPlanningRequest, this));
@@ -307,19 +307,19 @@ private:
     void publishPathVisualization(const auto_msgs::msg::PlanningPath& path) {
         visualization_msgs::msg::MarkerArray marker_array;
         
-        // 创建路径标记
+        // 创建路径标记（更粗的线条）
         visualization_msgs::msg::Marker path_marker;
         path_marker.header = path.header;
         path_marker.ns = "planning_path";
         path_marker.id = 0;
         path_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
         path_marker.action = visualization_msgs::msg::Marker::ADD;
-        path_marker.scale.x = 0.2;  // 线宽
+        path_marker.scale.x = 0.3;  // 增加线宽，使路径更明显
         
         // 根据规划器类型设置不同颜色
         if (path.planner_type == "astar") {
             path_marker.color.r = 0.0;
-            path_marker.color.g = 0.0;
+            path_marker.color.g = 0.4;
             path_marker.color.b = 1.0;
         } else {  // hybrid_astar
             path_marker.color.r = 0.0;
@@ -333,21 +333,17 @@ private:
             geometry_msgs::msg::Point p;
             p.x = point.pose.position.x;
             p.y = point.pose.position.y;
-            p.z = 0.1;  // 略高于地图平面
+            p.z = 0.15;  // 更高一些，避免与地图重叠
             path_marker.points.push_back(p);
         }
         
-        // 创建路径点标记（特别是对Hybrid A*展示方向）
-        if (path.planner_type == "hybrid_astar") {
-            visualization_msgs::msg::Marker arrows_marker;
-            arrows_marker.header = path.header;
-            arrows_marker.ns = "planning_path";
-            arrows_marker.id = 1;
-            arrows_marker.type = visualization_msgs::msg::Marker::ARROW;
-            arrows_marker.action = visualization_msgs::msg::Marker::ADD;
-            
+        marker_array.markers.push_back(path_marker);
+        
+        // 为所有路径类型添加方向指示
+        if (!path.points.empty()) {
             // 每隔几个点放一个箭头表示方向
-            for (size_t i = 0; i < path.points.size(); i += 5) {
+            int arrow_interval = std::max(1, static_cast<int>(path.points.size() / 10));  // 大约10个箭头
+            for (size_t i = 0; i < path.points.size(); i += arrow_interval) {
                 visualization_msgs::msg::Marker arrow;
                 arrow.header = path.header;
                 arrow.ns = "path_direction";
@@ -355,19 +351,121 @@ private:
                 arrow.type = visualization_msgs::msg::Marker::ARROW;
                 arrow.action = visualization_msgs::msg::Marker::ADD;
                 arrow.pose = path.points[i].pose;
-                arrow.scale.x = 1.0;  // 箭头长度
-                arrow.scale.y = 0.2;  // 箭头宽度
-                arrow.scale.z = 0.2;  // 箭头高度
-                arrow.color.r = 1.0;
-                arrow.color.g = 1.0;
-                arrow.color.b = 0.0;
-                arrow.color.a = 1.0;
+                arrow.pose.position.z = 0.2;  // 稍微高于路径线
+                
+                arrow.scale.x = 1.2;  // 箭头长度
+                arrow.scale.y = 0.3;  // 箭头宽度
+                arrow.scale.z = 0.3;  // 箭头高度
+                
+                // 设置箭头颜色
+                if (path.planner_type == "astar") {
+                    arrow.color.r = 1.0;
+                    arrow.color.g = 1.0;
+                    arrow.color.b = 0.0;  // 黄色箭头
+                } else {
+                    arrow.color.r = 1.0;
+                    arrow.color.g = 0.5;
+                    arrow.color.b = 0.0;  // 橙色箭头
+                }
+                arrow.color.a = 0.8;
                 
                 marker_array.markers.push_back(arrow);
             }
+            
+            // 添加车辆形状可视化（沿路径显示车辆轮廓）
+            int vehicle_interval = std::max(3, static_cast<int>(path.points.size() / 8));  // 大约8个车辆
+            for (size_t i = 0; i < path.points.size(); i += vehicle_interval) {
+                // 创建车辆轮廓标记
+                visualization_msgs::msg::Marker vehicle_marker;
+                vehicle_marker.header = path.header;
+                vehicle_marker.ns = "vehicle_footprint";
+                vehicle_marker.id = i;
+                vehicle_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+                vehicle_marker.action = visualization_msgs::msg::Marker::ADD;
+                vehicle_marker.scale.x = 0.15;  // 线宽
+                
+                // 设置车辆轮廓颜色
+                vehicle_marker.color.r = 0.8;
+                vehicle_marker.color.g = 0.2;
+                vehicle_marker.color.b = 0.8;  // 紫色
+                vehicle_marker.color.a = 0.7;
+                
+                // 车辆尺寸参数
+                double vehicle_length = 4.5;
+                double vehicle_width = 2.0;
+                double half_length = vehicle_length / 2.0;
+                double half_width = vehicle_width / 2.0;
+                
+                // 获取车辆姿态
+                double x = path.points[i].pose.position.x;
+                double y = path.points[i].pose.position.y;
+                double theta = 2.0 * std::atan2(path.points[i].pose.orientation.z, 
+                                               path.points[i].pose.orientation.w);
+                
+                // 计算车辆四个角点的世界坐标
+                std::vector<std::pair<double, double>> corners = {
+                    {half_length, half_width},    // 右前角
+                    {half_length, -half_width},   // 左前角
+                    {-half_length, -half_width},  // 左后角
+                    {-half_length, half_width},   // 右后角
+                    {half_length, half_width}     // 回到起点形成闭合
+                };
+                
+                double cos_theta = std::cos(theta);
+                double sin_theta = std::sin(theta);
+                
+                for (const auto& corner : corners) {
+                    double local_x = corner.first;
+                    double local_y = corner.second;
+                    
+                    // 旋转变换到世界坐标
+                    double world_x = x + local_x * cos_theta - local_y * sin_theta;
+                    double world_y = y + local_x * sin_theta + local_y * cos_theta;
+                    
+                    geometry_msgs::msg::Point p;
+                    p.x = world_x;
+                    p.y = world_y;
+                    p.z = 0.25;  // 高于路径
+                    vehicle_marker.points.push_back(p);
+                }
+                
+                marker_array.markers.push_back(vehicle_marker);
+            }
+            
+            // 添加起点和终点特殊标记
+            visualization_msgs::msg::Marker start_marker;
+            start_marker.header = path.header;
+            start_marker.ns = "path_endpoints";
+            start_marker.id = 0;
+            start_marker.type = visualization_msgs::msg::Marker::SPHERE;
+            start_marker.action = visualization_msgs::msg::Marker::ADD;
+            start_marker.pose = path.points.front().pose;
+            start_marker.pose.position.z = 0.3;
+            
+            start_marker.scale.x = 0.8;
+            start_marker.scale.y = 0.8;
+            start_marker.scale.z = 0.8;
+            
+            start_marker.color.r = 0.0;
+            start_marker.color.g = 1.0;
+            start_marker.color.b = 0.0;  // 绿色起点
+            start_marker.color.a = 1.0;
+            
+            marker_array.markers.push_back(start_marker);
+            
+            // 终点标记
+            visualization_msgs::msg::Marker goal_marker = start_marker;
+            goal_marker.id = 1;
+            goal_marker.pose = path.points.back().pose;
+            goal_marker.pose.position.z = 0.3;
+            
+            goal_marker.color.r = 1.0;
+            goal_marker.color.g = 0.0;
+            goal_marker.color.b = 0.0;  // 红色终点
+            
+            marker_array.markers.push_back(goal_marker);
         }
         
-        marker_array.markers.push_back(path_marker);
         vis_pub_->publish(marker_array);
     }
     
