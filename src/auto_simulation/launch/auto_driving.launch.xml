@@ -44,6 +44,10 @@
     <param name="mqtt_client_id" value="auto_driving_bridge"/>
   </node>
   
+  <!-- 在auto_driving.launch.xml中现有节点后添加 -->
+  <node pkg="auto_simulation" exec="simple_bridge.py" name="simple_bridge_node">
+    <param name="some_param" value="some_value"/>
+  </node>
   <!-- 如果需要，启动RViz可视化 -->
   <group if="$(var use_rviz)">
     <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(find-pkg-share auto_simulation)/config/auto_driving.rviz"/>

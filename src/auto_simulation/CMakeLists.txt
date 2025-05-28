@@ -99,6 +99,12 @@ install(DIRECTORY
   PATTERN ".svn" EXCLUDE
 )
 
+# Install Python scripts
+install(PROGRAMS
+  scripts/simple_bridge.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
