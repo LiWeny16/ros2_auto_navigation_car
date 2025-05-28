@@ -88,11 +88,18 @@ install_python_deps() {
 build_in_order() {
     local build_type="$1"
     local clean_build="$2"
+    local specific_package="$3"  # 新增：指定包参数
     
     # 清理编译结果
     if [[ "$clean_build" == true ]]; then
-        log_info "清理之前的编译结果..."
-        rm -rf build/ install/ log/
+        if [[ -n "$specific_package" ]]; then
+            # 如果指定了包，只清理该包
+            log_info "清理包 $specific_package 的编译结果..."
+            rm -rf "build/$specific_package" "install/$specific_package" "log/latest_build/$specific_package"
+        else
+            log_info "清理所有编译结果..."
+            rm -rf build/ install/ log/
+        fi
     fi
     
     # 验证包是否存在
@@ -108,24 +115,18 @@ build_in_order() {
         fi
     done
     
-    log_info "按依赖顺序编译包..."
-    log_info "编译顺序: ${PACKAGE_ORDER[*]}"
-    
-    for package in "${PACKAGE_ORDER[@]}"; do
-        log_info "正在编译包: $package"
-        
-        local colcon_cmd="colcon build --packages-select $package --symlink-install"
+    if [[ -n "$specific_package" ]]; then
+        log_info "编译包 $specific_package 及其依赖..."
+        local colcon_cmd="colcon build --packages-up-to $specific_package --symlink-install"
         colcon_cmd+=" --cmake-args -DCMAKE_BUILD_TYPE=$build_type"
         
         # 特殊包处理
-        case "$package" in
+        case "$specific_package" in
             "auto_planning")
-                # 跳过测试以避免编译错误
                 colcon_cmd+=" -DBUILD_TESTING=OFF"
                 log_info "auto_planning: 跳过测试编译"
                 ;;
             "auto_integration_test")
-                # 确保前置依赖都已编译
                 if [[ ! -d "install/auto_msgs" ]] || [[ ! -d "install/auto_control" ]]; then
                     log_error "auto_integration_test 缺少必要的前置依赖"
                     return 1
@@ -134,41 +135,53 @@ build_in_order() {
         esac
         
         log_info "执行编译命令: $colcon_cmd"
-        
-        if eval "$colcon_cmd"; then
-            log_success "包 $package 编译完成"
-            
-            # 每次编译完一个包就加载其环境
-            if [[ -f "install/setup.bash" ]]; then
-                # shellcheck source=/dev/null
-                # 设置环境变量以避免未绑定变量错误
-                export COLCON_TRACE=${COLCON_TRACE:-}
-                export AMENT_TRACE_SETUP_FILES=${AMENT_TRACE_SETUP_FILES:-}
-                export AMENT_PYTHON_EXECUTABLE=${AMENT_PYTHON_EXECUTABLE:-}
-                export COLCON_PYTHON_EXECUTABLE=${COLCON_PYTHON_EXECUTABLE:-}
-                # 临时关闭严格模式以避免环境脚本错误
-                set +u
-                source install/setup.bash
-                set -u
-                log_info "已加载 $package 的环境"
-            fi
-        else
-            local exit_code=$?
-            log_error "包 $package 编译失败 (退出码: $exit_code)"
-            
-            # 提供调试信息
-            echo ""
-            echo "调试信息:"
-            echo "- 检查 src/$package/CMakeLists.txt"
-            echo "- 检查 src/$package/package.xml"
-            echo "- 查看详细日志: log/latest_build/$package/stdout.log"
-            echo "- 查看错误日志: log/latest_build/$package/stderr.log"
-            
+        if ! eval "$colcon_cmd"; then
+            log_error "包 $specific_package 编译失败"
             return 1
         fi
         
-        echo "----------------------------------------"
-    done
+        log_success "包 $specific_package 及其依赖编译完成"
+    else
+        log_info "按依赖顺序编译所有包..."
+        log_info "编译顺序: ${PACKAGE_ORDER[*]}"
+        
+        for package in "${PACKAGE_ORDER[@]}"; do
+            log_info "正在编译包: $package"
+            
+            local colcon_cmd="colcon build --packages-select $package --symlink-install"
+            colcon_cmd+=" --cmake-args -DCMAKE_BUILD_TYPE=$build_type"
+            
+            # 特殊包处理
+            case "$package" in
+                "auto_planning")
+                    colcon_cmd+=" -DBUILD_TESTING=OFF"
+                    log_info "auto_planning: 跳过测试编译"
+                    ;;
+                "auto_integration_test")
+                    if [[ ! -d "install/auto_msgs" ]] || [[ ! -d "install/auto_control" ]]; then
+                        log_error "auto_integration_test 缺少必要的前置依赖"
+                        return 1
+                    fi
+                    ;;
+            esac
+            
+            log_info "执行编译命令: $colcon_cmd"
+            if ! eval "$colcon_cmd"; then
+                log_error "包 $package 编译失败"
+                return 1
+            fi
+            
+            log_success "包 $package 编译完成"
+        done
+    fi
+    
+    # 加载环境
+    if [[ -f "install/setup.bash" ]]; then
+        set +u
+        source install/setup.bash
+        set -u
+        log_info "已加载环境"
+    fi
     
     return 0
 }
@@ -289,31 +302,30 @@ main() {
     # 检查ROS2环境
     if [[ -z "${ROS_DISTRO:-}" ]]; then
         log_info "加载ROS2环境..."
-        # shellcheck source=/dev/null
         source /opt/ros/humble/setup.bash
     fi
     
     # 选择编译方式
-    if [[ "$ordered_build" == true ]]; then
-        if build_in_order "$build_type" "$clean_build"; then
+    if [[ -n "$specific_packages" ]]; then
+        # 编译指定包及其依赖
+        IFS=',' read -ra PACKAGES <<< "$specific_packages"
+        for package in "${PACKAGES[@]}"; do
+            if ! build_in_order "$build_type" "$clean_build" "$package"; then
+                log_error "包 $package 编译失败"
+                exit 1
+            fi
+        done
+        log_success "指定包编译完成"
+    elif [[ "$ordered_build" == true ]]; then
+        if build_in_order "$build_type" "$clean_build" ""; then
             log_success "按依赖顺序编译完成"
         else
             log_error "按依赖顺序编译失败"
             exit 1
         fi
-    elif [[ -n "$specific_packages" ]]; then
-        # 编译指定包
-        local colcon_cmd="colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=${build_type}"
-        IFS=',' read -ra PACKAGES <<< "$specific_packages"
-        for package in "${PACKAGES[@]}"; do
-            colcon_cmd+=" --packages-select $package"
-        done
-        
-        log_info "执行编译命令: ${colcon_cmd}"
-        eval "$colcon_cmd"
     else
-        # 标准编译（可能会有依赖问题）
-        log_warning "使用标准编译，建议使用 --ordered 选项"
+        # 标准编译（不推荐）
+        log_warning "使用标准编译，建议使用 --ordered 或 --packages 选项"
         local colcon_cmd="colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=${build_type}"
         
         if [[ "$clean_build" == true ]]; then
@@ -322,16 +334,6 @@ main() {
         
         log_info "执行编译命令: ${colcon_cmd}"
         eval "$colcon_cmd"
-    fi
-    
-    # 加载环境
-    if [[ -f "install/setup.bash" ]]; then
-        # shellcheck source=/dev/null
-        # 临时关闭严格模式以避免环境脚本错误
-        set +u
-        source install/setup.bash
-        set -u
-        log_success "环境已加载"
     fi
     
     echo ""

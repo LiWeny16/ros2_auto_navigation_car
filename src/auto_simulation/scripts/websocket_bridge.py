@@ -22,8 +22,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ROS2WebSocketBridge(Node):
-    def __init__(self):
+    def __init__(self, loop):
         super().__init__('websocket_bridge')
+        self.loop = loop  # 存储主线程的事件循环
         
         # WebSocket客户端列表
         self.websocket_clients = set()
@@ -65,7 +66,6 @@ class ROS2WebSocketBridge(Node):
     async def broadcast_to_websockets(self, message):
         """向所有WebSocket客户端广播消息"""
         if self.websocket_clients:
-            # 创建一个列表副本以避免在迭代时修改集合
             clients_copy = self.websocket_clients.copy()
             disconnected_clients = set()
             
@@ -78,7 +78,6 @@ class ROS2WebSocketBridge(Node):
                     logger.error(f"Error sending message to client: {e}")
                     disconnected_clients.add(client)
             
-            # 移除断开连接的客户端
             for client in disconnected_clients:
                 self.remove_websocket_client(client)
 
@@ -102,7 +101,8 @@ class ROS2WebSocketBridge(Node):
                 }
             }
         }
-        asyncio.create_task(self.broadcast_to_websockets(message))
+        # 安全调度协程到主线程事件循环
+        asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
 
     def objects_callback(self, msg):
         """检测对象回调"""
@@ -143,7 +143,7 @@ class ROS2WebSocketBridge(Node):
                 'markers': markers
             }
         }
-        asyncio.create_task(self.broadcast_to_websockets(message))
+        asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
 
     def gridmap_callback(self, msg):
         """网格地图回调"""
@@ -163,7 +163,7 @@ class ROS2WebSocketBridge(Node):
                 'data': list(msg.data)
             }
         }
-        asyncio.create_task(self.broadcast_to_websockets(message))
+        asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
 
     def path_callback(self, msg):
         """规划路径回调"""
@@ -173,15 +173,15 @@ class ROS2WebSocketBridge(Node):
                 'pose': {
                     'pose': {
                         'position': {
-                            'x': point.pose.pose.position.x,
-                            'y': point.pose.pose.position.y,
-                            'z': point.pose.pose.position.z
+                            'x': point.pose.position.x,
+                            'y': point.pose.position.y,
+                            'z': point.pose.position.z
                         },
                         'orientation': {
-                            'x': point.pose.pose.orientation.x,
-                            'y': point.pose.pose.orientation.y,
-                            'z': point.pose.pose.orientation.z,
-                            'w': point.pose.pose.orientation.w
+                            'x': point.pose.orientation.x,
+                            'y': point.pose.orientation.y,
+                            'z': point.pose.orientation.z,
+                            'w': point.pose.orientation.w
                         }
                     }
                 },
@@ -192,12 +192,20 @@ class ROS2WebSocketBridge(Node):
         message = {
             'topic': '/planning_path',
             'msg': {
+                'header': {
+                    'frame_id': msg.header.frame_id,
+                    'stamp': {
+                        'sec': msg.header.stamp.sec,
+                        'nanosec': msg.header.stamp.nanosec
+                    }
+                },
                 'points': points,
-                'total_length': msg.total_length,
-                'planner_type': msg.planner_type
+                'planner_type': msg.planner_type,
+                'total_distance': msg.total_distance,
+                'planning_time': msg.planning_time
             }
         }
-        asyncio.create_task(self.broadcast_to_websockets(message))
+        asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
 
     def handle_websocket_message(self, message_data):
         """处理来自WebSocket的消息"""
@@ -209,11 +217,9 @@ class ROS2WebSocketBridge(Node):
 
             if op == 'publish':
                 if topic == '/planning_request':
-                    # 发布规划请求
                     planning_msg = PlanningRequest()
                     planning_msg.header.frame_id = msg_data.get('header', {}).get('frame_id', 'map')
                     
-                    # 设置起点
                     start_data = msg_data.get('start', {}).get('pose', {})
                     start_pos = start_data.get('position', {})
                     start_ori = start_data.get('orientation', {})
@@ -226,7 +232,6 @@ class ROS2WebSocketBridge(Node):
                     planning_msg.start.pose.orientation.z = float(start_ori.get('z', 0))
                     planning_msg.start.pose.orientation.w = float(start_ori.get('w', 1))
                     
-                    # 设置终点
                     goal_data = msg_data.get('goal', {}).get('pose', {})
                     goal_pos = goal_data.get('position', {})
                     goal_ori = goal_data.get('orientation', {})
@@ -246,7 +251,6 @@ class ROS2WebSocketBridge(Node):
                     logger.info("Published planning request")
 
                 elif topic == '/control_cmd':
-                    # 发布控制命令
                     control_msg = Twist()
                     control_msg.linear.x = float(msg_data.get('linear', {}).get('x', 0))
                     control_msg.linear.y = float(msg_data.get('linear', {}).get('y', 0))
@@ -261,11 +265,10 @@ class ROS2WebSocketBridge(Node):
         except Exception as e:
             logger.error(f"Error handling WebSocket message: {e}")
 
-
 # 全局桥接节点实例
 bridge_node = None
 
-async def handle_websocket_client(websocket, path):
+async def handle_websocket_client(websocket, path=None):
     """处理WebSocket客户端连接"""
     global bridge_node
     
@@ -285,12 +288,12 @@ async def handle_websocket_client(websocket, path):
     finally:
         bridge_node.remove_websocket_client(websocket)
 
-def run_ros2_node():
+def run_ros2_node(loop):
     """在单独线程中运行ROS2节点"""
     global bridge_node
     
     rclpy.init()
-    bridge_node = ROS2WebSocketBridge()
+    bridge_node = ROS2WebSocketBridge(loop)  # 传递事件循环
     
     executor = MultiThreadedExecutor()
     executor.add_node(bridge_node)
@@ -305,8 +308,10 @@ def run_ros2_node():
 
 async def main():
     """主函数"""
-    # 在后台线程启动ROS2节点
-    ros2_thread = threading.Thread(target=run_ros2_node, daemon=True)
+    loop = asyncio.get_running_loop()  # 获取主线程的事件循环
+    
+    # 在后台线程启动ROS2节点，并传递事件循环
+    ros2_thread = threading.Thread(target=run_ros2_node, args=(loop,), daemon=True)
     ros2_thread.start()
     
     # 等待ROS2节点初始化

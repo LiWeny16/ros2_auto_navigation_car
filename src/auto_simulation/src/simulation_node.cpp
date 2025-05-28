@@ -39,97 +39,96 @@ public:
     }
 
 private:
-    void publishMap() {
-        auto_msgs::msg::GridMap map;
-        map.header.stamp = this->now();
-        map.header.frame_id = "map";
+void publishMap() {
+    auto_msgs::msg::GridMap map;
+    map.header.stamp = this->now();
+    map.header.frame_id = "map";
+    
+    // 设置地图尺寸和分辨率
+    map.width = 100;
+    map.height = 100;
+    map.resolution = 0.5;  // 每个网格0.5米
+    
+    // 设置地图原点
+    map.origin.position.x = -25.0;
+    map.origin.position.y = -25.0;
+    map.origin.position.z = 0.0;
+    map.origin.orientation.w = 1.0;
+    
+    // 初始化地图数据（所有单元格默认为0，表示可通行）
+    map.data.resize(map.width * map.height, 0);
+    
+    // 添加一些随机障碍物
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis_x(10, map.width - 10);
+    std::uniform_int_distribution<> dis_y(10, map.height - 10);
+    std::uniform_int_distribution<> dis_size(5, 15);
+    
+    // 添加几个随机形状的障碍物
+    for (int i = 0; i < 5; ++i) {
+        int center_x = dis_x(gen);
+        int center_y = dis_y(gen);
+        int size = dis_size(gen);
         
-        // 设置地图尺寸和分辨率
-        map.width = 100;
-        map.height = 100;
-        map.resolution = 0.5;  // 每个网格0.5米
-        
-        // 设置地图原点
-        map.origin.position.x = -25.0;
-        map.origin.position.y = -25.0;
-        map.origin.position.z = 0.0;
-        map.origin.orientation.w = 1.0;
-        
-        // 初始化地图数据（所有单元格默认为0，表示可通行）
-        map.data.resize(map.width * map.height, 0);
-        
-        // 添加一些随机障碍物
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> dis_x(10, map.width - 10);
-        std::uniform_int_distribution<> dis_y(10, map.height - 10);
-        std::uniform_int_distribution<> dis_size(5, 15);
-        
-        // 添加几个随机形状的障碍物
-        for (int i = 0; i < 5; ++i) {
-            int center_x = dis_x(gen);
-            int center_y = dis_y(gen);
-            int size = dis_size(gen);
-            
-            for (int dx = -size/2; dx <= size/2; ++dx) {
-                for (int dy = -size/2; dy <= size/2; ++dy) {
-                    if (dx*dx + dy*dy <= size*size/4) {  // 圆形障碍物
-                        int x = center_x + dx;
-                        int y = center_y + dy;
-                        if (x >= 0 && x < map.width && y >= 0 && y < map.height) {
-                            map.data[y * map.width + x] = 100;  // 100表示障碍物
-                        }
+        for (unsigned int dx = 0; dx <= static_cast<unsigned int>(size); ++dx) {
+            for (unsigned int dy = 0; dy <= static_cast<unsigned int>(size); ++dy) {
+                int x = center_x + static_cast<int>(dx) - size/2;
+                int y = center_y + static_cast<int>(dy) - size/2;
+                if (dx*dx + dy*dy <= static_cast<unsigned int>(size*size)/4) {  // 圆形障碍物
+                    if (x >= 0 && static_cast<unsigned int>(x) < map.width && y >= 0 && static_cast<unsigned int>(y) < map.height) {
+                        map.data[y * map.width + x] = 100;  // 100表示障碍物
                     }
                 }
             }
         }
-        
-        // 添加一些线性障碍物（墙壁）
-        for (int i = 0; i < 3; ++i) {
-            int start_x = dis_x(gen);
-            int start_y = dis_y(gen);
-            int end_x = dis_x(gen);
-            int end_y = dis_y(gen);
-            
-            // 绘制线段
-            int dx = std::abs(end_x - start_x);
-            int dy = std::abs(end_y - start_y);
-            int sx = (start_x < end_x) ? 1 : -1;
-            int sy = (start_y < end_y) ? 1 : -1;
-            int err = dx - dy;
-            
-            int x = start_x;
-            int y = start_y;
-            while (true) {
-                if (x >= 0 && x < map.width && y >= 0 && y < map.height) {
-                    map.data[y * map.width + x] = 100;
-                }
-                
-                if (x == end_x && y == end_y) break;
-                
-                int e2 = 2 * err;
-                if (e2 > -dy) {
-                    err -= dy;
-                    x += sx;
-                }
-                if (e2 < dx) {
-                    err += dx;
-                    y += sy;
-                }
-            }
-        }
-        
-        // 发布地图
-        map_pub_->publish(map);
-        RCLCPP_INFO(this->get_logger(), "已发布地图");
-        
-        // 保存当前地图用于路径规划
-        current_map_ = map;
-        
-        // 可视化地图
-        publishMapVisualization(map);
     }
     
+    // 添加一些线性障碍物（墙壁）
+    for (int i = 0; i < 3; ++i) {
+        int start_x = dis_x(gen);
+        int start_y = dis_y(gen);
+        int end_x = dis_x(gen);
+        int end_y = dis_y(gen);
+        
+        // 绘制线段
+        int dx = std::abs(end_x - start_x);
+        int dy = std::abs(end_y - start_y);
+        int sx = (start_x < end_x) ? 1 : -1;
+        int sy = (start_y < end_y) ? 1 : -1;
+        int err = dx - dy;
+        
+        unsigned int x = static_cast<unsigned int>(start_x);
+        unsigned int y = static_cast<unsigned int>(start_y);
+        while (true) {
+            if (x < map.width && y < map.height) {
+                map.data[y * map.width + x] = 100;
+            }
+            
+            if (x == static_cast<unsigned int>(end_x) && y == static_cast<unsigned int>(end_y)) break;
+            
+            int e2 = 2 * err;
+            if (e2 > -dy) {
+                err -= dy;
+                x += sx;
+            }
+            if (e2 < dx) {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+    
+    // 发布地图
+    map_pub_->publish(map);
+    RCLCPP_INFO(this->get_logger(), "已发布地图");
+    
+    // 保存当前地图用于路径规划
+    current_map_ = map;
+    
+    // 可视化地图
+    publishMapVisualization(map);
+}
     void publishMapVisualization(const auto_msgs::msg::GridMap& map) {
         visualization_msgs::msg::MarkerArray marker_array;
         
