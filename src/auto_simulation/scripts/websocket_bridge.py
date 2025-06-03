@@ -216,46 +216,38 @@ class ROS2WebSocketBridge(Node):
         asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
         
     def gridmap_json_callback(self, msg):
-        """JSON格式网格地图回调"""
+        """JSON格式网格地图回调 - 只转发不解析"""
         try:
-            # 解析JSON字符串
-            json_data = json.loads(msg.data)
-            
-            # 创建带有标准化主题名称的消息
+            # 直接转发原始JSON数据，不进行解析
             message = {
-                'topic': '/grid_map',
+                'topic': '/grid_map_json',
                 'json': True,
-                'msg': json_data['data'],
-                'type': json_data.get('type', 'grid_map')
+                'raw_data': msg.data  # 直接转发原始JSON字符串
             }
             
             # 直接转发到WebSocket客户端
             asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
-            logger.debug("JSON地图数据转发至WebSocket")
+            logger.debug("JSON地图数据直接转发至WebSocket")
             
         except Exception as e:
-            logger.error(f"处理JSON地图数据时出错: {e}")
+            logger.error(f"转发JSON地图数据时出错: {e}")
     
     def planning_request_json_callback(self, msg):
-        """JSON格式规划请求回调"""
+        """JSON格式规划请求回调 - 只转发不解析"""
         try:
-            # 解析JSON字符串
-            json_data = json.loads(msg.data)
-            
-            # 创建带有标准化主题名称的消息
+            # 直接转发原始JSON数据，不进行解析
             message = {
-                'topic': '/planning_request',
+                'topic': '/planning_request_json',
                 'json': True,
-                'msg': json_data['data'],
-                'type': json_data.get('type', 'planning_request')
+                'raw_data': msg.data  # 直接转发原始JSON字符串
             }
             
             # 直接转发到WebSocket客户端
             asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
-            logger.debug("JSON规划请求数据转发至WebSocket")
+            logger.debug("JSON规划请求数据直接转发至WebSocket")
             
         except Exception as e:
-            logger.error(f"处理JSON规划请求数据时出错: {e}")
+            logger.error(f"转发JSON规划请求数据时出错: {e}")
 
     def handle_websocket_message(self, message_data):
         """处理来自WebSocket的消息"""

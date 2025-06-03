@@ -36,8 +36,8 @@ public:
         path_clear_pub_ = this->create_publisher<std_msgs::msg::Empty>("clear_path", 10);
         
         // 创建JSON格式的发布者
-        map_json_pub_ = json_utils::create_json_publisher(this, "grid_map", 10);
-        planning_request_json_pub_ = json_utils::create_json_publisher(this, "planning_request", 10);
+        map_json_pub_ = json_utils::create_json_publisher(this, "grid_map_json", 10);
+        planning_request_json_pub_ = json_utils::create_json_publisher(this, "planning_request_json", 10);
         
         // 创建订阅者
         path_sub_ = this->create_subscription<auto_msgs::msg::PlanningPath>(
@@ -225,9 +225,9 @@ private:
         map_pub_->publish(map);
         
         // 同时发布JSON格式的地图
-        json_utils::publish_as_json(map_json_pub_, map, "grid_map");
+        json_utils::publish_as_json(map_json_pub_, map, "grid_map_json");
         
-        RCLCPP_INFO(this->get_logger(), "已发布地图 (序列: %d, 障碍物: %d, 墙壁: %d, 同时以JSON格式发布)", 
+        RCLCPP_INFO(this->get_logger(), "已发布地图 (序列: %d, 障碍物: %d, 墙壁: %d, 同时以JSON格式发布到grid_map_json主题)", 
                    map_sequence_, num_obstacles, num_walls);
         
         // 保存当前地图用于路径规划
@@ -405,9 +405,9 @@ private:
         planning_request_pub_->publish(request);
         
         // 同时发布JSON格式的规划请求
-        json_utils::publish_as_json(planning_request_json_pub_, request, "planning_request");
+        json_utils::publish_as_json(planning_request_json_pub_, request, "planning_request_json");
         
-        RCLCPP_INFO(this->get_logger(), "已发送规划请求 (地图序列: %d, 规划器: %s, 同时以JSON格式发布)", 
+        RCLCPP_INFO(this->get_logger(), "已发送规划请求 (地图序列: %d, 规划器: %s, 同时以JSON格式发布到planning_request_json主题)", 
                    map_sequence_, request.planner_type.c_str());
         
         // 可视化起点和终点

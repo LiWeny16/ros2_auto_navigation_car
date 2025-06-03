@@ -92,10 +92,58 @@ export const useROS2Connection = (wsUrl: string = 'ws://localhost:9090'): UseROS
   const isConnectedRef = useRef(false);
 
   // 处理ROS2消息的函数
-  const handleROS2Message = useCallback((message: { topic: string; msg: unknown }) => {
+  const handleROS2Message = useCallback((message: { topic: string; msg?: unknown; json?: boolean; raw_data?: string }) => {
     try {
-      const { topic, msg } = message;
+      const { topic, msg, json, raw_data } = message;
 
+      // 处理包含raw_data的JSON消息（来自WebSocket桥接的JSON转发）
+      if (json && raw_data) {
+        let parsedData;
+        try {
+          parsedData = JSON.parse(raw_data);
+        } catch (error) {
+          console.error(`Error parsing raw JSON data for topic ${topic}:`, error);
+          setLastError({
+            type: 'parse',
+            message: `Failed to parse raw JSON data for topic ${topic}: ${error}`,
+            timestamp: Date.now()
+          });
+          return;
+        }
+
+        switch (topic) {
+          case '/grid_map_json': {
+            setData(prev => ({
+              ...prev,
+              gridMap: {
+                width: safeGet(parsedData, 'width', 0),
+                height: safeGet(parsedData, 'height', 0),
+                resolution: safeGet(parsedData, 'resolution', 0.1),
+                origin: { 
+                  x: safeGet(parsedData, 'origin.position.x', 0), 
+                  y: safeGet(parsedData, 'origin.position.y', 0) 
+                },
+                data: safeGet(parsedData, 'data', [] as number[])
+              }
+            }));
+            break;
+          }
+
+          case '/planning_request_json': {
+            // 处理规划请求的JSON数据，这里可能需要根据实际需求进行处理
+            console.log('Received planning request JSON:', parsedData);
+            // 如果需要更新状态，可以在这里添加相应的逻辑
+            break;
+          }
+
+          default:
+            console.warn(`Unhandled JSON topic: ${topic}`);
+            break;
+        }
+        return;
+      }
+
+      // 处理标准ROS2消息（非JSON转发）
       switch (topic) {
         case '/vehicle_state': {
           const position = validatePosition(safeGet(msg, 'pose.position', {}));
@@ -177,6 +225,10 @@ export const useROS2Connection = (wsUrl: string = 'ws://localhost:9090'): UseROS
           }
           break;
         }
+
+        default:
+          console.warn(`Unhandled topic: ${topic}`);
+          break;
       }
     } catch (error) {
       console.error('Error handling ROS2 message:', error);
@@ -231,8 +283,18 @@ export const useROS2Connection = (wsUrl: string = 'ws://localhost:9090'): UseROS
           },
           {
             op: 'subscribe',
+            topic: '/grid_map_json',
+            type: 'std_msgs/String'
+          },
+          {
+            op: 'subscribe',
             topic: '/planning_path',
             type: 'auto_msgs/PlanningPath'
+          },
+          {
+            op: 'subscribe',
+            topic: '/planning_request_json',
+            type: 'std_msgs/String'
           },
           {
             op: 'subscribe',
