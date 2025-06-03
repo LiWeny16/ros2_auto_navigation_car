@@ -43,14 +43,6 @@ class ROS2WebSocketBridge(Node):
             PlanningPath, '/planning_path', self.path_callback, 10
         )
         
-        # JSON格式的订阅者
-        self.gridmap_json_sub = self.create_subscription(
-            String, '/grid_map_json', self.gridmap_json_callback, 10
-        )
-        self.planning_request_json_sub = self.create_subscription(
-            String, '/planning_request_json', self.planning_request_json_callback, 10
-        )
-        
         # ROS2发布者
         self.planning_request_pub = self.create_publisher(
             PlanningRequest, '/planning_request', 10
@@ -214,48 +206,6 @@ class ROS2WebSocketBridge(Node):
             }
         }
         asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
-        
-    def gridmap_json_callback(self, msg):
-        """JSON格式网格地图回调"""
-        try:
-            # 解析JSON字符串
-            json_data = json.loads(msg.data)
-            
-            # 创建带有标准化主题名称的消息
-            message = {
-                'topic': '/grid_map',
-                'json': True,
-                'msg': json_data['data'],
-                'type': json_data.get('type', 'grid_map')
-            }
-            
-            # 直接转发到WebSocket客户端
-            asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
-            logger.debug("JSON地图数据转发至WebSocket")
-            
-        except Exception as e:
-            logger.error(f"处理JSON地图数据时出错: {e}")
-    
-    def planning_request_json_callback(self, msg):
-        """JSON格式规划请求回调"""
-        try:
-            # 解析JSON字符串
-            json_data = json.loads(msg.data)
-            
-            # 创建带有标准化主题名称的消息
-            message = {
-                'topic': '/planning_request',
-                'json': True,
-                'msg': json_data['data'],
-                'type': json_data.get('type', 'planning_request')
-            }
-            
-            # 直接转发到WebSocket客户端
-            asyncio.run_coroutine_threadsafe(self.broadcast_to_websockets(message), self.loop)
-            logger.debug("JSON规划请求数据转发至WebSocket")
-            
-        except Exception as e:
-            logger.error(f"处理JSON规划请求数据时出错: {e}")
 
     def handle_websocket_message(self, message_data):
         """处理来自WebSocket的消息"""

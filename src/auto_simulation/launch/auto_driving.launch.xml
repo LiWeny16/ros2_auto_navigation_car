@@ -4,7 +4,7 @@
   
   启动以下节点:
   - 仿真节点 (simulation_node): 生成地图和规划请求
-  - 规划节点 (path_planner_node): 执行A*和Hybrid A*路径规划
+  - 规划节点 (path_planner_node): 执行A*和Hybrid A*路径规划，支持实时地图更新响应
   - RViz可视化工具: 显示模拟结果
 -->
 <launch>
@@ -14,13 +14,21 @@
   
   <!-- 启动仿真节点 -->
   <node pkg="auto_simulation" exec="simulation_node" name="simulation_node">
-    <param name="map_update_interval" value="5.0"/>
-    <param name="planning_interval" value="10.0"/>
+    <!-- 地图更新频率更高，确保地图数据的实时性 -->
+    <param name="map_update_interval" value="3.0"/>
+    <!-- 规划请求频率稍低，避免过度频繁的请求 -->
+    <param name="planning_interval" value="8.0"/>
   </node>
 
   <!-- 启动规划节点 -->
   <node pkg="auto_planning" exec="path_planner_node" name="path_planner_node">
     <param name="default_planner" value="$(var planner_type)"/>
+    <!-- 地图变化检测参数 - 更敏感的变化检测 -->
+    <param name="map_change_threshold" value="0.03"/>
+    <!-- 重新规划延迟 - 快速响应 -->
+    <param name="replan_delay_ms" value="50"/>
+    <!-- 最大地图年龄 - 确保使用新鲜的地图数据 -->
+    <param name="max_map_age_ms" value="5000"/>
   </node>
   
   <!-- 启动感知节点 -->
@@ -44,10 +52,11 @@
     <param name="mqtt_client_id" value="auto_driving_bridge"/>
   </node>
   
-  <!-- 在auto_driving.launch.xml中现有节点后添加 -->
+  <!-- 启动简单桥接节点 -->
   <node pkg="auto_simulation" exec="simple_bridge.py" name="simple_bridge_node">
     <param name="some_param" value="some_value"/>
   </node>
+  
   <!-- 如果需要，启动RViz可视化 -->
   <group if="$(var use_rviz)">
     <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(find-pkg-share auto_simulation)/config/auto_driving.rviz"/>

@@ -348,17 +348,17 @@ handle_choice() {
                         4)
                             package="auto_control"
                             log_info "编译模块: $package"
-                            colcon build --packages-select $package $debug_option $clean_option
+                            build_specific_target "$package" "" "$clean_option" "$debug_option"
                             ;;
                         5)
                             package="auto_simulation"
                             log_info "编译模块: $package"
-                            colcon build --packages-select $package $debug_option $clean_option
+                            build_specific_target "$package" "" "$clean_option" "$debug_option"
                             ;;
                         6)
                             package="auto_integration_test"
                             log_info "编译模块: $package"
-                            colcon build --packages-select $package $debug_option $clean_option
+                            build_specific_target "$package" "" "$clean_option" "$debug_option"
                             ;;
                         7)
                             echo ""
@@ -493,16 +493,28 @@ build_specific_target() {
         return 1
     fi
     
+    # 处理清理选项
+    if [[ "$clean_option" == "--clean" ]]; then
+        log_info "清理 $package 包..."
+        rm -rf build/"$package" install/"$package"
+    fi
+    
+    # 准备cmake参数
+    local cmake_args="-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    if [[ "$debug_option" == "--debug" ]]; then
+        cmake_args="$cmake_args -DCMAKE_BUILD_TYPE=Debug"
+    else
+        cmake_args="$cmake_args -DCMAKE_BUILD_TYPE=Release"
+    fi
+    
     if [[ -z "$target" ]]; then
         log_info "编译整个包: $package"
-        colcon build --packages-select "$package" $debug_option $clean_option
+        colcon build --packages-select "$package" --cmake-args $cmake_args
     else
         log_info "编译特定目标: $package::$target"
-        colcon build --packages-select "$package" --cmake-target "$target" $debug_option $clean_option
+        colcon build --packages-select "$package" --cmake-target "$target" --cmake-args $cmake_args
     fi
-}
-
-# 编译依赖链函数
+}    # 编译依赖链函数
 build_dependency_chain() {
     local package="$1"
     local clean_option="$2"
@@ -538,8 +550,24 @@ build_dependency_chain() {
             ;;
     esac
     
+    # 处理清理选项
+    if [[ "$clean_option" == "--clean" ]]; then
+        log_info "清理相关包..."
+        for pkg in "${deps[@]}"; do
+            rm -rf build/"$pkg" install/"$pkg"
+        done
+    fi
+    
+    # 准备cmake参数
+    local cmake_args="-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    if [[ "$debug_option" == "--debug" ]]; then
+        cmake_args="$cmake_args -DCMAKE_BUILD_TYPE=Debug"
+    else
+        cmake_args="$cmake_args -DCMAKE_BUILD_TYPE=Release"
+    fi
+    
     log_info "将按以下顺序编译: ${deps[*]}"
-    colcon build --packages-select "${deps[@]}" $debug_option $clean_option
+    colcon build --packages-select "${deps[@]}" --cmake-args $cmake_args
 }
 
 # 主循环

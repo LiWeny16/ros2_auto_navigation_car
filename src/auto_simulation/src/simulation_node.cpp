@@ -3,6 +3,7 @@
 #include <vector>
 #include <random>
 #include <chrono>
+#include <cmath>
 
 #include "rclcpp/rclcpp.hpp"
 #include "auto_msgs/msg/grid_map.hpp"
@@ -10,7 +11,10 @@
 #include "auto_msgs/msg/planning_path.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
+#include "visualization_msgs/msg/marker.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "std_msgs/msg/empty.hpp"
+#include "auto_simulation/json_utils.hpp"
 
 using namespace std::chrono_literals;
 
@@ -19,116 +23,220 @@ namespace auto_simulation {
 class SimulationNode : public rclcpp::Node {
 public:
     SimulationNode() : Node("simulation_node") {
+        // 获取参数
+        this->declare_parameter("map_update_interval", 5.0);
+        this->declare_parameter("planning_interval", 10.0);  // 保留但不使用
+        
+        map_update_interval_ = this->get_parameter("map_update_interval").as_double();
+        
         // 创建发布者
         map_pub_ = this->create_publisher<auto_msgs::msg::GridMap>("grid_map", 10);
         vis_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_marker_array", 10);
         planning_request_pub_ = this->create_publisher<auto_msgs::msg::PlanningRequest>("planning_request", 10);
+        path_clear_pub_ = this->create_publisher<std_msgs::msg::Empty>("clear_path", 10);
+        
+        // 创建JSON格式的发布者
+        map_json_pub_ = json_utils::create_json_publisher(this, "grid_map", 10);
+        planning_request_json_pub_ = json_utils::create_json_publisher(this, "planning_request", 10);
         
         // 创建订阅者
         path_sub_ = this->create_subscription<auto_msgs::msg::PlanningPath>(
             "planning_path", 10, std::bind(&SimulationNode::pathCallback, this, std::placeholders::_1));
         
-        // 创建定时器
+        // 只创建地图发布定时器
         map_timer_ = this->create_wall_timer(
-            10s, std::bind(&SimulationNode::publishMap, this));
+            std::chrono::duration<double>(map_update_interval_), 
+            std::bind(&SimulationNode::publishMapAndRequestPlanning, this));
         
-        request_timer_ = this->create_wall_timer(
-            10s, std::bind(&SimulationNode::sendPlanningRequest, this));
+        // 创建延迟规划请求定时器（单次触发）
+        planning_delay_timer_ = this->create_wall_timer(
+            100ms, std::bind(&SimulationNode::sendDelayedPlanningRequest, this));
+        planning_delay_timer_->cancel(); // 初始时取消
         
-        RCLCPP_INFO(this->get_logger(), "模拟节点已启动");
+        // 初始化状态
+        map_sequence_ = 0;
+        have_valid_start_goal_ = false;
+        
+        RCLCPP_INFO(this->get_logger(), "模拟节点已启动 - 地图更新间隔: %.1fs", map_update_interval_);
+        RCLCPP_INFO(this->get_logger(), "地图发布后将立即触发路径规划请求");
     }
 
 private:
-void publishMap() {
-    auto_msgs::msg::GridMap map;
-    map.header.stamp = this->now();
-    map.header.frame_id = "map";
-    
-    // 设置地图尺寸和分辨率
-    map.width = 100;
-    map.height = 100;
-    map.resolution = 0.5;  // 每个网格0.5米
-    
-    // 设置地图原点
-    map.origin.position.x = -25.0;
-    map.origin.position.y = -25.0;
-    map.origin.position.z = 0.0;
-    map.origin.orientation.w = 1.0;
-    
-    // 初始化地图数据（所有单元格默认为0，表示可通行）
-    map.data.resize(map.width * map.height, 0);
-    
-    // 添加一些随机障碍物
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis_x(10, map.width - 10);
-    std::uniform_int_distribution<> dis_y(10, map.height - 10);
-    std::uniform_int_distribution<> dis_size(5, 15);
-    
-    // 添加几个随机形状的障碍物
-    for (int i = 0; i < 5; ++i) {
-        int center_x = dis_x(gen);
-        int center_y = dis_y(gen);
-        int size = dis_size(gen);
+    void publishMapAndRequestPlanning() {
+        // 1. 先清理旧路径
+        clearOldPath();
         
-        for (unsigned int dx = 0; dx <= static_cast<unsigned int>(size); ++dx) {
-            for (unsigned int dy = 0; dy <= static_cast<unsigned int>(size); ++dy) {
-                int x = center_x + static_cast<int>(dx) - size/2;
-                int y = center_y + static_cast<int>(dy) - size/2;
-                if (dx*dx + dy*dy <= static_cast<unsigned int>(size*size)/4) {  // 圆形障碍物
-                    if (x >= 0 && static_cast<unsigned int>(x) < map.width && y >= 0 && static_cast<unsigned int>(y) < map.height) {
-                        map.data[y * map.width + x] = 100;  // 100表示障碍物
+        // 2. 发布新地图
+        publishMap();
+        
+        // 3. 延迟一小段时间后发送规划请求，确保地图已被处理
+        scheduleDelayedPlanningRequest();
+        
+        RCLCPP_INFO(this->get_logger(), "地图发布 -> 清理旧路径 -> 准备发送规划请求");
+    }
+    
+    void clearOldPath() {
+        // 发布路径清理消息给规划节点
+        std_msgs::msg::Empty clear_msg;
+        path_clear_pub_->publish(clear_msg);
+        
+        // 只清理特定的路径可视化标记，不要删除所有
+        visualization_msgs::msg::MarkerArray clear_markers;
+        
+        // 清理路径线条
+        visualization_msgs::msg::Marker delete_path;
+        delete_path.header.stamp = this->now();
+        delete_path.header.frame_id = "map";
+        delete_path.ns = "planning_path";
+        delete_path.action = visualization_msgs::msg::Marker::DELETEALL;
+        clear_markers.markers.push_back(delete_path);
+        
+        // 清理路径方向箭头
+        visualization_msgs::msg::Marker delete_arrows;
+        delete_arrows.header.stamp = this->now();
+        delete_arrows.header.frame_id = "map";
+        delete_arrows.ns = "path_direction";
+        delete_arrows.action = visualization_msgs::msg::Marker::DELETEALL;
+        clear_markers.markers.push_back(delete_arrows);
+        
+        // 清理车辆轮廓
+        visualization_msgs::msg::Marker delete_vehicles;
+        delete_vehicles.header.stamp = this->now();
+        delete_vehicles.header.frame_id = "map";
+        delete_vehicles.ns = "vehicle_footprint";
+        delete_vehicles.action = visualization_msgs::msg::Marker::DELETEALL;
+        clear_markers.markers.push_back(delete_vehicles);
+        
+        // 清理路径端点
+        visualization_msgs::msg::Marker delete_endpoints;
+        delete_endpoints.header.stamp = this->now();
+        delete_endpoints.header.frame_id = "map";
+        delete_endpoints.ns = "path_endpoints";
+        delete_endpoints.action = visualization_msgs::msg::Marker::DELETEALL;
+        clear_markers.markers.push_back(delete_endpoints);
+        
+        vis_pub_->publish(clear_markers);
+        
+        RCLCPP_DEBUG(this->get_logger(), "已清理旧路径可视化标记");
+    }
+    
+    void scheduleDelayedPlanningRequest() {
+        // 取消之前的定时器
+        planning_delay_timer_->cancel();
+        
+        // 重新创建定时器，延迟发送规划请求
+        planning_delay_timer_ = this->create_wall_timer(
+            150ms, // 150ms延迟，确保地图已被规划节点处理
+            std::bind(&SimulationNode::sendDelayedPlanningRequest, this));
+    }
+    
+    void sendDelayedPlanningRequest() {
+        planning_delay_timer_->cancel(); // 确保只执行一次
+        
+        RCLCPP_INFO(this->get_logger(), "发送延迟规划请求 (地图序列: %d)", map_sequence_);
+        sendPlanningRequest();
+    }
+
+    void publishMap() {
+        auto_msgs::msg::GridMap map;
+        map.header.stamp = this->now();
+        map.header.frame_id = "map";
+        
+        // 增加地图序列号
+        map_sequence_++;
+        
+        // 设置地图尺寸和分辨率
+        map.width = 100;
+        map.height = 100;
+        map.resolution = 0.5;  // 每个网格0.5米
+        
+        // 设置地图原点
+        map.origin.position.x = -25.0;
+        map.origin.position.y = -25.0;
+        map.origin.position.z = 0.0;
+        map.origin.orientation.w = 1.0;
+        
+        // 初始化地图数据（所有单元格默认为0，表示可通行）
+        map.data.resize(map.width * map.height, 0);
+        
+        // 使用序列号作为随机种子，确保地图有变化但可重现
+        std::mt19937 gen(map_sequence_ * 12345 + 67890);
+        std::uniform_int_distribution<> dis_x(10, map.width - 10);
+        std::uniform_int_distribution<> dis_y(10, map.height - 10);
+        std::uniform_int_distribution<> dis_size(3, 8); // 减小障碍物尺寸
+        
+        // 添加随机障碍物（数量也会变化）
+        int num_obstacles = 2 + (map_sequence_ % 3); // 2-4个障碍物（减少数量）
+        for (int i = 0; i < num_obstacles; ++i) {
+            int center_x = dis_x(gen);
+            int center_y = dis_y(gen);
+            int size = dis_size(gen);
+            
+            for (unsigned int dx = 0; dx <= static_cast<unsigned int>(size); ++dx) {
+                for (unsigned int dy = 0; dy <= static_cast<unsigned int>(size); ++dy) {
+                    int x = center_x + static_cast<int>(dx) - size/2;
+                    int y = center_y + static_cast<int>(dy) - size/2;
+                    if (dx*dx + dy*dy <= static_cast<unsigned int>(size*size)/4) {  // 圆形障碍物
+                        if (x >= 0 && static_cast<unsigned int>(x) < map.width && y >= 0 && static_cast<unsigned int>(y) < map.height) {
+                            map.data[y * map.width + x] = 100;  // 100表示障碍物
+                        }
                     }
                 }
             }
         }
-    }
-    
-    // 添加一些线性障碍物（墙壁）
-    for (int i = 0; i < 3; ++i) {
-        int start_x = dis_x(gen);
-        int start_y = dis_y(gen);
-        int end_x = dis_x(gen);
-        int end_y = dis_y(gen);
         
-        // 绘制线段
-        int dx = std::abs(end_x - start_x);
-        int dy = std::abs(end_y - start_y);
-        int sx = (start_x < end_x) ? 1 : -1;
-        int sy = (start_y < end_y) ? 1 : -1;
-        int err = dx - dy;
-        
-        unsigned int x = static_cast<unsigned int>(start_x);
-        unsigned int y = static_cast<unsigned int>(start_y);
-        while (true) {
-            if (x < map.width && y < map.height) {
-                map.data[y * map.width + x] = 100;
-            }
+        // 添加线性障碍物（墙壁）
+        int num_walls = 1 + (map_sequence_ % 2); // 1-2个墙壁（减少数量）
+        for (int i = 0; i < num_walls; ++i) {
+            int start_x = dis_x(gen);
+            int start_y = dis_y(gen);
+            int end_x = dis_x(gen);
+            int end_y = dis_y(gen);
             
-            if (x == static_cast<unsigned int>(end_x) && y == static_cast<unsigned int>(end_y)) break;
+            // 绘制线段
+            int dx = std::abs(end_x - start_x);
+            int dy = std::abs(end_y - start_y);
+            int sx = (start_x < end_x) ? 1 : -1;
+            int sy = (start_y < end_y) ? 1 : -1;
+            int err = dx - dy;
             
-            int e2 = 2 * err;
-            if (e2 > -dy) {
-                err -= dy;
-                x += sx;
-            }
-            if (e2 < dx) {
-                err += dx;
-                y += sy;
+            unsigned int x = static_cast<unsigned int>(start_x);
+            unsigned int y = static_cast<unsigned int>(start_y);
+            while (true) {
+                if (x < map.width && y < map.height) {
+                    map.data[y * map.width + x] = 100;
+                }
+                
+                if (x == static_cast<unsigned int>(end_x) && y == static_cast<unsigned int>(end_y)) break;
+                
+                int e2 = 2 * err;
+                if (e2 > -dy) {
+                    err -= dy;
+                    x += sx;
+                }
+                if (e2 < dx) {
+                    err += dx;
+                    y += sy;
+                }
             }
         }
+        
+        // 发布地图
+        map_pub_->publish(map);
+        
+        // 同时发布JSON格式的地图
+        json_utils::publish_as_json(map_json_pub_, map, "grid_map");
+        
+        RCLCPP_INFO(this->get_logger(), "已发布地图 (序列: %d, 障碍物: %d, 墙壁: %d, 同时以JSON格式发布)", 
+                   map_sequence_, num_obstacles, num_walls);
+        
+        // 保存当前地图用于路径规划
+        current_map_ = map;
+        
+        // 可视化地图
+        publishMapVisualization(map);
     }
     
-    // 发布地图
-    map_pub_->publish(map);
-    RCLCPP_INFO(this->get_logger(), "已发布地图");
-    
-    // 保存当前地图用于路径规划
-    current_map_ = map;
-    
-    // 可视化地图
-    publishMapVisualization(map);
-}
     void publishMapVisualization(const auto_msgs::msg::GridMap& map) {
         visualization_msgs::msg::MarkerArray marker_array;
         
@@ -175,34 +283,78 @@ void publishMap() {
         request.header.stamp = this->now();
         request.header.frame_id = "map";
         
+        // 车辆参数（与HybridAStarPlanner保持一致）
+        double vehicle_length = 4.5;
+        double vehicle_width = 2.0;
+        double safety_margin = 0.2;
+        
+        // 计算车辆占用的网格数量（包括安全边距）
+        double total_length = vehicle_length + 2 * safety_margin;
+        double total_width = vehicle_width + 2 * safety_margin;
+        int length_grids = static_cast<int>(std::ceil(total_length / current_map_.resolution));
+        int width_grids = static_cast<int>(std::ceil(total_width / current_map_.resolution));
+        
+        // 确保有足够的边距避免边界问题
+        int margin = std::max(length_grids, width_grids) / 2 + 2;
+        
         // 设置起点和终点
-        std::random_device rd;
-        std::mt19937 gen(rd());
+        std::mt19937 gen(map_sequence_ * 54321 + 98765); // 使用不同的种子确保起点终点变化
         
         // 在地图有效区域内随机选择起点和终点
         bool valid_request = false;
         int max_attempts = 100;
         
         while (!valid_request && max_attempts > 0) {
-            // 随机选择起点和终点在地图内的位置
-            std::uniform_int_distribution<> dis_x(5, current_map_.width - 5);
-            std::uniform_int_distribution<> dis_y(5, current_map_.height - 5);
+            // 随机选择起点和终点在地图内的位置（考虑车辆尺寸）
+            std::uniform_int_distribution<> dis_x(margin, current_map_.width - margin);
+            std::uniform_int_distribution<> dis_y(margin, current_map_.height - margin);
             
             int start_x = dis_x(gen);
             int start_y = dis_y(gen);
             int goal_x = dis_x(gen);
             int goal_y = dis_y(gen);
             
-            // 确保起点和终点是空闲的
-            if (current_map_.data[start_y * current_map_.width + start_x] == 0 && 
-                current_map_.data[goal_y * current_map_.width + goal_x] == 0) {
-                
-                // 确保起点和终点有一定距离
+            // 检查起点区域是否完全空闲
+            bool start_valid = true;
+            for (int dy = -width_grids/2; dy <= width_grids/2 && start_valid; ++dy) {
+                for (int dx = -length_grids/2; dx <= length_grids/2 && start_valid; ++dx) {
+                    int check_x = start_x + dx;
+                    int check_y = start_y + dy;
+                    if (check_x >= 0 && check_x < static_cast<int>(current_map_.width) &&
+                        check_y >= 0 && check_y < static_cast<int>(current_map_.height)) {
+                        if (current_map_.data[check_y * current_map_.width + check_x] != 0) {
+                            start_valid = false;
+                        }
+                    } else {
+                        start_valid = false;
+                    }
+                }
+            }
+            
+            // 检查终点区域是否完全空闲
+            bool goal_valid = true;
+            for (int dy = -width_grids/2; dy <= width_grids/2 && goal_valid; ++dy) {
+                for (int dx = -length_grids/2; dx <= length_grids/2 && goal_valid; ++dx) {
+                    int check_x = goal_x + dx;
+                    int check_y = goal_y + dy;
+                    if (check_x >= 0 && check_x < static_cast<int>(current_map_.width) &&
+                        check_y >= 0 && check_y < static_cast<int>(current_map_.height)) {
+                        if (current_map_.data[check_y * current_map_.width + check_x] != 0) {
+                            goal_valid = false;
+                        }
+                    } else {
+                        goal_valid = false;
+                    }
+                }
+            }
+            
+            if (start_valid && goal_valid) {
+                // 确保起点和终点有足够距离
                 double dx = start_x - goal_x;
                 double dy = start_y - goal_y;
                 double distance = std::sqrt(dx*dx + dy*dy);
                 
-                if (distance > 40.0) {  // 至少40个网格单元
+                if (distance > 20.0) {  // 至少20个网格单元的距离
                     // 设置起点
                     request.start.header = request.header;
                     request.start.pose.position.x = current_map_.origin.position.x + (start_x + 0.5) * current_map_.resolution;
@@ -225,28 +377,38 @@ void publishMap() {
                     request.goal.pose.orientation.w = std::cos(goal_angle / 2.0);
                     request.goal.pose.orientation.z = std::sin(goal_angle / 2.0);
                     
+                    // 保存当前起点终点
+                    current_start_ = request.start;
+                    current_goal_ = request.goal;
+                    have_valid_start_goal_ = true;
+                    
                     valid_request = true;
+                    
+                    RCLCPP_INFO(this->get_logger(), "选择起点: 网格(%d,%d) 世界(%.2f,%.2f)", 
+                               start_x, start_y, request.start.pose.position.x, request.start.pose.position.y);
+                    RCLCPP_INFO(this->get_logger(), "选择终点: 网格(%d,%d) 世界(%.2f,%.2f)", 
+                               goal_x, goal_y, request.goal.pose.position.x, request.goal.pose.position.y);
                 }
             }
-            
             max_attempts--;
         }
         
         if (!valid_request) {
-            RCLCPP_ERROR(this->get_logger(), "无法生成有效的规划请求，请重试");
+            RCLCPP_ERROR(this->get_logger(), "无法找到有效的起点和终点（考虑车辆尺寸后）");
             return;
         }
         
-        // 随机选择规划器类型
-        std::uniform_int_distribution<> dis_planner(0, 1);
-        request.planner_type = (dis_planner(gen) == 0) ? "astar" : "hybrid_astar";
-        
-        // 是否考虑运动学约束（对Hybrid A*有效）
-        request.consider_kinematic = (request.planner_type == "hybrid_astar");
+        // 设置规划器类型
+        request.planner_type = "astar";
         
         // 发布规划请求
         planning_request_pub_->publish(request);
-        RCLCPP_INFO(this->get_logger(), "已发送规划请求，规划器类型: %s", request.planner_type.c_str());
+        
+        // 同时发布JSON格式的规划请求
+        json_utils::publish_as_json(planning_request_json_pub_, request, "planning_request");
+        
+        RCLCPP_INFO(this->get_logger(), "已发送规划请求 (地图序列: %d, 规划器: %s, 同时以JSON格式发布)", 
+                   map_sequence_, request.planner_type.c_str());
         
         // 可视化起点和终点
         publishStartGoalVisualization(request.start, request.goal);
@@ -258,40 +420,69 @@ void publishMap() {
         
         visualization_msgs::msg::MarkerArray marker_array;
         
-        // 创建起点标记
+        // 起点标记
         visualization_msgs::msg::Marker start_marker;
-        start_marker.header = start.header;
-        start_marker.ns = "planning_points";
-        start_marker.id = 1;
-        start_marker.type = visualization_msgs::msg::Marker::ARROW;
+        start_marker.header.stamp = this->now();
+        start_marker.header.frame_id = "map";
+        start_marker.ns = "start_goal";
+        start_marker.id = 0;
+        start_marker.type = visualization_msgs::msg::Marker::SPHERE;
         start_marker.action = visualization_msgs::msg::Marker::ADD;
         start_marker.pose = start.pose;
-        start_marker.scale.x = 2.0;  // 箭头长度
-        start_marker.scale.y = 0.5;  // 箭头宽度
-        start_marker.scale.z = 0.5;  // 箭头高度
+        start_marker.pose.position.z = 0.5;
+        
+        start_marker.scale.x = 1.0;
+        start_marker.scale.y = 1.0;
+        start_marker.scale.z = 1.0;
+        
         start_marker.color.r = 0.0;
         start_marker.color.g = 1.0;
         start_marker.color.b = 0.0;
         start_marker.color.a = 1.0;
         
-        // 创建终点标记
-        visualization_msgs::msg::Marker goal_marker;
-        goal_marker.header = goal.header;
-        goal_marker.ns = "planning_points";
-        goal_marker.id = 2;
-        goal_marker.type = visualization_msgs::msg::Marker::ARROW;
-        goal_marker.action = visualization_msgs::msg::Marker::ADD;
+        marker_array.markers.push_back(start_marker);
+        
+        // 终点标记
+        visualization_msgs::msg::Marker goal_marker = start_marker;
+        goal_marker.id = 1;
         goal_marker.pose = goal.pose;
-        goal_marker.scale.x = 2.0;
-        goal_marker.scale.y = 0.5;
-        goal_marker.scale.z = 0.5;
         goal_marker.color.r = 1.0;
         goal_marker.color.g = 0.0;
-        goal_marker.color.b = 1.0;
-        goal_marker.color.a = 1.0;
+        goal_marker.color.b = 0.0;
         
-        marker_array.markers.push_back(start_marker);
         marker_array.markers.push_back(goal_marker);
+        
+        // 起点箭头表示朝向
+        visualization_msgs::msg::Marker start_arrow;
+        start_arrow.header = start_marker.header;
+        start_arrow.ns = "start_goal";
+        start_arrow.id = 2;
+        start_arrow.type = visualization_msgs::msg::Marker::ARROW;
+        start_arrow.action = visualization_msgs::msg::Marker::ADD;
+        start_arrow.pose = start.pose;
+        start_arrow.pose.position.z = 0.3;
+        
+        start_arrow.scale.x = 2.0;
+        start_arrow.scale.y = 0.5;
+        start_arrow.scale.z = 0.5;
+        
+        start_arrow.color.r = 0.0;
+        start_arrow.color.g = 0.8;
+        start_arrow.color.b = 0.0;
+        start_arrow.color.a = 0.8;
+        
+        marker_array.markers.push_back(start_arrow);
+        
+        // 终点箭头表示朝向
+        visualization_msgs::msg::Marker goal_arrow = start_arrow;
+        goal_arrow.id = 3;
+        goal_arrow.pose = goal.pose;
+        goal_arrow.color.r = 0.8;
+        goal_arrow.color.g = 0.0;
+        goal_arrow.color.b = 0.0;
+        
+        marker_array.markers.push_back(goal_arrow);
+        
         vis_pub_->publish(marker_array);
     }
     
@@ -472,16 +663,28 @@ void publishMap() {
     rclcpp::Publisher<auto_msgs::msg::GridMap>::SharedPtr map_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr vis_pub_;
     rclcpp::Publisher<auto_msgs::msg::PlanningRequest>::SharedPtr planning_request_pub_;
+    rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr path_clear_pub_;
+    
+    // JSON格式的发布者
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr map_json_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr planning_request_json_pub_;
     
     // 订阅者
     rclcpp::Subscription<auto_msgs::msg::PlanningPath>::SharedPtr path_sub_;
     
     // 定时器
     rclcpp::TimerBase::SharedPtr map_timer_;
-    rclcpp::TimerBase::SharedPtr request_timer_;
+    rclcpp::TimerBase::SharedPtr planning_delay_timer_;
     
     // 当前地图
     auto_msgs::msg::GridMap current_map_;
+    
+    // 状态变量
+    int map_sequence_;
+    bool have_valid_start_goal_;
+    geometry_msgs::msg::PoseStamped current_start_;
+    geometry_msgs::msg::PoseStamped current_goal_;
+    double map_update_interval_;
 };
 
 } // namespace auto_simulation

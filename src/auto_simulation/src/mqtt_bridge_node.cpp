@@ -78,7 +78,7 @@ private:
         }
     }
     
-    void mqttMessageCallback(const std::string& topic, const std::string& payload) {
+    void mqttMessageCallback(const std::string& topic, [[maybe_unused]] const std::string& payload) {
         RCLCPP_INFO(this->get_logger(), "收到MQTT消息: %s", topic.c_str());
         
         try {
