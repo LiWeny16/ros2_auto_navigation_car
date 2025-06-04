@@ -52,8 +52,10 @@
     <param name="mqtt_client_id" value="auto_driving_bridge"/>
   </node>
   
-  <!-- 启动简单桥接节点 -->
-
+  <!-- 启动WebSocket桥接节点 -->
+  <node pkg="auto_simulation" exec="websocket_bridge.py" name="websocket_bridge_node">
+    <param name="websocket_port" value="9090"/>
+  </node>
   
   <!-- 如果需要，启动RViz可视化 -->
   <group if="$(var use_rviz)">
