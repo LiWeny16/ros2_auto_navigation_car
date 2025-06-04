@@ -16,6 +16,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/PathPoint.msg"
   "msg/PlanningPath.msg"
   "msg/PlanningRequest.msg"
+  "msg/VehicleControl.msg"
   DEPENDENCIES std_msgs geometry_msgs
 )
 

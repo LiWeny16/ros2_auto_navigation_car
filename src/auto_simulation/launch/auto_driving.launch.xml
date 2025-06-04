@@ -53,9 +53,7 @@
   </node>
   
   <!-- 启动简单桥接节点 -->
-  <node pkg="auto_simulation" exec="simple_bridge.py" name="simple_bridge_node">
-    <param name="some_param" value="some_value"/>
-  </node>
+
   
   <!-- 如果需要，启动RViz可视化 -->
   <group if="$(var use_rviz)">

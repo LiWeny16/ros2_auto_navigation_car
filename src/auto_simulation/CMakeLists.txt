@@ -101,7 +101,7 @@ install(DIRECTORY
 
 # Install Python scripts
 install(PROGRAMS
-  scripts/simple_bridge.py
+  # scripts/simple_bridge.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
